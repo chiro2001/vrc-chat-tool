@@ -32,6 +32,7 @@ function App() {
   // Test recording state
   const [testRecordings, setTestRecordings] = useState<any[]>([]);
   const [isTestRecording, setIsTestRecording] = useState(false);
+  const [showTestModal, setShowTestModal] = useState(false);
 
   // Log panel state
   const [showLogs, setShowLogs] = useState(false);
@@ -236,6 +237,10 @@ function App() {
           </span>
         </div>
 
+        <button className="test-modal-trigger" onClick={() => setShowTestModal(true)}>
+          {t("test.title")}
+        </button>
+
         <button
           className={`record-button ${isRecording ? "recording" : ""}`}
           onClick={toggleRecording}
@@ -266,44 +271,53 @@ function App() {
         )}
       </section>
 
-      {/* Test Recording Section */}
-      <section className="test-recording-panel">
-        <h2>{t("test.title")}</h2>
-        <div className="test-recording-controls">
-          <button
-            className={`record-button ${isTestRecording ? "recording" : ""}`}
-            onClick={toggleTestRecording}
-          >
-            {isTestRecording ? t("test.stop") : t("test.start")}
-          </button>
-          <button className="refresh-button" onClick={loadRecordings}>
-            {t("test.refresh")}
-          </button>
-        </div>
-
-        {testRecordings.length > 0 && (
-          <div className="recordings-list">
-            {testRecordings.map((rec: any) => (
-              <div key={rec.filename} className="recording-item">
-                <span className="rec-filename" title={rec.path}>{rec.filename}</span>
-                <span className="rec-size">({(rec.size_bytes / 1024).toFixed(1)} KB)</span>
+      {/* Test Recording Modal */}
+      {showTestModal && (
+        <div className="modal-overlay" onClick={() => setShowTestModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{t("test.title")}</h2>
+              <button className="modal-close" onClick={() => setShowTestModal(false)}>X</button>
+            </div>
+            <div className="modal-body">
+              <div className="test-recording-controls">
                 <button
-                  className="play-button"
-                  onClick={() => playRecording(rec.path)}
+                  className={`record-button ${isTestRecording ? "recording" : ""}`}
+                  onClick={toggleTestRecording}
                 >
-                  {t("test.play")}
+                  {isTestRecording ? t("test.stop") : t("test.start")}
                 </button>
-                <button
-                  className="delete-button"
-                  onClick={() => deleteRecording(rec.filename)}
-                >
-                  {t("test.delete")}
+                <button className="refresh-button" onClick={loadRecordings}>
+                  {t("test.refresh")}
                 </button>
               </div>
-            ))}
+
+              {testRecordings.length > 0 && (
+                <div className="recordings-list">
+                  {testRecordings.map((rec: any) => (
+                    <div key={rec.filename} className="recording-item">
+                      <span className="rec-filename" title={rec.path}>{rec.filename}</span>
+                      <span className="rec-size">({(rec.size_bytes / 1024).toFixed(1)} KB)</span>
+                      <button
+                        className="play-button"
+                        onClick={() => playRecording(rec.path)}
+                      >
+                        {t("test.play")}
+                      </button>
+                      <button
+                        className="delete-button"
+                        onClick={() => deleteRecording(rec.filename)}
+                      >
+                        {t("test.delete")}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </section>
+        </div>
+      )}
 
       {/* Configuration */}
       <section className="config-panel">

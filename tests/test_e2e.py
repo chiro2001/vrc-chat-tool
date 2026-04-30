@@ -35,6 +35,36 @@ def generate_test_tone(path, freq=440.0, duration=3.0, sample_rate=16000, amplit
     print(f"Generated test tone: {path} ({freq}Hz, {duration}s)")
 
 
+def estimate_frequency(samples, sample_rate):
+    """Estimate dominant frequency using zero-crossing rate"""
+    if len(samples) < 2:
+        return 0.0
+    crossings = 0
+    for i in range(1, len(samples)):
+        if (samples[i-1] >= 0 and samples[i] < 0) or (samples[i-1] < 0 and samples[i] >= 0):
+            crossings += 1
+    duration = len(samples) / sample_rate
+    freq = crossings / 2.0 / duration
+    return freq
+
+
+def estimate_frequency_fft(samples, sample_rate):
+    """Estimate dominant frequency using FFT (more accurate)"""
+    import numpy as np
+    n = len(samples)
+    if n < 256:
+        return 0.0
+    window = np.hanning(n)
+    fft = np.abs(np.fft.rfft(np.array(samples) * window))
+    freqs = np.fft.rfftfreq(n, 1.0 / sample_rate)
+    # Find peak in 200-2000Hz range (typical test tones)
+    mask = (freqs >= 200) & (freqs <= 2000)
+    if mask.any():
+        peak_idx = np.argmax(fft[mask])
+        return freqs[mask][peak_idx]
+    return 0.0
+
+
 def play_wav_to_vb_cable(wav_path, device_index=VB_CABLE_PLAYBACK_INDEX):
     """Play WAV file through VB-Cable output device"""
     import sounddevice as sd
@@ -63,8 +93,9 @@ def play_wav_to_vb_cable(wav_path, device_index=VB_CABLE_PLAYBACK_INDEX):
         raise
 
 
-def verify_captured_wav(wav_path, expected_freq=440.0, expected_duration=3.0, tolerance=0.5):
-    """Verify captured WAV file has expected characteristics"""
+def verify_captured_wav(wav_path, expected_freq=440.0, expected_duration=3.0, tolerance=0.5, freq_tolerance=20.0):
+    """Verify captured WAV file has expected characteristics including frequency.
+    Returns True if ALL checks pass, False otherwise."""
     with wave.open(str(wav_path), 'rb') as wf:
         sample_rate = wf.getframerate()
         n_frames = wf.getnframes()
@@ -73,26 +104,50 @@ def verify_captured_wav(wav_path, expected_freq=440.0, expected_duration=3.0, to
     n_samples = len(raw) // 2
     samples = struct.unpack(f'<{n_samples}h', raw)
 
+    all_ok = True
+
     # Check non-empty
-    assert n_samples > 0, "Captured audio is empty"
+    if n_samples == 0:
+        print("  FAIL: Captured audio is empty")
+        return False
     print(f"  Samples: {n_samples}, Rate: {sample_rate}Hz")
+
+    # Check sample rate
+    if sample_rate not in (16000, 44100, 48000, 96000):
+        print(f"  FAIL: Unexpected sample rate: {sample_rate}")
+        all_ok = False
+    else:
+        print(f"  Sample rate: {sample_rate}Hz OK")
 
     # Check duration
     actual_duration = n_samples / sample_rate
-    assert abs(actual_duration - expected_duration) < tolerance, \
-        f"Duration mismatch: {actual_duration}s vs expected ~{expected_duration}s"
-    print(f"  Duration: {actual_duration:.2f}s (expected ~{expected_duration}s) OK")
+    duration_ok = abs(actual_duration - expected_duration) < tolerance
+    status = "OK" if duration_ok else f"WRONG ({actual_duration:.2f}s vs expected ~{expected_duration}s)"
+    print(f"  Duration: {actual_duration:.2f}s (expected ~{expected_duration}s) {status}")
+    if not duration_ok:
+        all_ok = False
 
     # Check for signal (not silence) using RMS
     rms = math.sqrt(sum(s*s for s in samples) / len(samples))
-    assert rms > 100, f"Signal too quiet: RMS={rms:.0f}"
-    print(f"  RMS: {rms:.0f} (signal detected) OK")
+    signal_ok = rms > 100
+    status = "OK" if signal_ok else f"TOO QUIET (RMS={rms:.0f})"
+    print(f"  RMS: {rms:.0f} {status}")
+    if not signal_ok:
+        all_ok = False
 
-    # Check sample rate
-    assert sample_rate in (16000, 44100, 48000, 96000), f"Unexpected sample rate: {sample_rate}"
-    print(f"  Sample rate: {sample_rate}Hz OK")
+    # Frequency check using FFT
+    estimated_freq = estimate_frequency_fft(samples, sample_rate)
+    freq_ok = abs(estimated_freq - expected_freq) < freq_tolerance
+    status = "OK" if freq_ok else f"WRONG (expected ~{expected_freq}Hz, got {estimated_freq:.0f}Hz)"
+    print(f"  Frequency (FFT): {estimated_freq:.0f}Hz (expected ~{expected_freq}Hz) {status}")
+    if not freq_ok:
+        all_ok = False
 
-    return True
+    # Also zero-crossing estimate for comparison
+    zc_freq = estimate_frequency(samples, sample_rate)
+    print(f"  Frequency (zero-crossing): {zc_freq:.0f}Hz")
+
+    return all_ok
 
 
 def build_rust_binary():
@@ -132,6 +187,31 @@ def run_rust_capture(duration_secs=3, output_wav="tmp/e2e_capture.wav"):
     return output_path
 
 
+def run_single_test(freq, duration, capture_secs):
+    """Run a single test tone and verify"""
+    test_wav = TMP_DIR / f"e2e_test_{freq}hz.wav"
+    capture_wav = TMP_DIR / f"e2e_capture_{freq}hz.wav"
+
+    generate_test_tone(test_wav, freq=freq, duration=duration, sample_rate=16000, amplitude=0.5)
+
+    playback_thread = threading.Thread(
+        target=play_wav_to_vb_cable,
+        args=(test_wav,),
+        daemon=True
+    )
+    playback_thread.start()
+    time.sleep(0.3)
+
+    captured = run_rust_capture(duration_secs=capture_secs, output_wav=f"tmp/e2e_capture_{int(freq)}hz.wav")
+    playback_thread.join(timeout=capture_secs + 2)
+
+    if captured is None or not captured.exists():
+        print("FAIL: Capture failed")
+        return False
+
+    return verify_captured_wav(captured, expected_freq=freq, expected_duration=duration, tolerance=1.0)
+
+
 def main():
     print("=" * 60)
     print("VRC Chat Tool - E2E Audio Pipeline Test")
@@ -141,43 +221,26 @@ def main():
     if not build_rust_binary():
         sys.exit(1)
 
-    # 2. Generate test tone
-    test_wav = TMP_DIR / "e2e_test_tone.wav"
-    generate_test_tone(test_wav, freq=440.0, duration=3.0)
+    tests = [
+        {"name": "440Hz / 3s", "freq": 440.0, "duration": 3.0, "capture_secs": 4},
+        {"name": "1000Hz / 2s", "freq": 1000.0, "duration": 2.0, "capture_secs": 3},
+    ]
 
-    # 3. Start playback in background thread
-    print("\nStarting playback thread...")
-    playback_thread = threading.Thread(
-        target=play_wav_to_vb_cable,
-        args=(test_wav,),
-        daemon=True
-    )
-    playback_thread.start()
+    results = []
+    for test in tests:
+        print(f"\n--- Test: {test['name']} ---")
+        result = run_single_test(test["freq"], test["duration"], test["capture_secs"])
+        results.append(result)
 
-    # Small delay to ensure playback is ready before capture starts
-    time.sleep(0.3)
+    # Summary
+    print("\n" + "=" * 60)
+    passed = sum(1 for r in results if r)
+    print(f"RESULTS: {passed}/{len(results)} tests passed")
+    for i, (r, t) in enumerate(zip(results, tests)):
+        print(f"  [{('PASS' if r else 'FAIL')}] {t['name']}")
+    print("=" * 60)
 
-    # 4. Run capture (blocking)
-    print("\nStarting capture...")
-    captured = run_rust_capture(duration_secs=4)  # extra second for safety
-
-    playback_thread.join(timeout=5)
-
-    if captured is None or not captured.exists():
-        print("\nFAIL: Capture failed or no output file")
-        sys.exit(1)
-
-    # 5. Verify captured audio
-    print(f"\nVerifying captured audio: {captured}")
-    try:
-        verify_captured_wav(captured, expected_freq=440.0, expected_duration=3.0, tolerance=1.0)
-        print("\n" + "=" * 60)
-        print("ALL TESTS PASSED")
-        print("=" * 60)
-        sys.exit(0)
-    except AssertionError as e:
-        print(f"\nFAIL: {e}")
-        sys.exit(1)
+    sys.exit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":

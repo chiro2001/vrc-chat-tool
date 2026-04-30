@@ -57,19 +57,20 @@ pub fn build_asr_url(
         .unwrap()
         .as_secs();
     let expired = timestamp + 86400;
-    let nonce = Uuid::new_v4().to_string();
+    let nonce = timestamp;
     let voice_id = Uuid::new_v4().to_string();
 
     let timestamp_str = timestamp.to_string();
     let expired_str = expired.to_string();
     let audio_format_str = audio_format.to_string();
+    let nonce_str = nonce.to_string();
 
     // Params for signing and URL (appid is NOT in params — it goes in the URL path)
     let mut params: Vec<(&str, &str)> = vec![
         ("secretid", secret_id),
         ("timestamp", &timestamp_str),
         ("expired", &expired_str),
-        ("nonce", &nonce),
+        ("nonce", &nonce_str),
         ("engine_model_type", engine_model),
         ("voice_id", &voice_id),
         ("voice_format", &audio_format_str),

@@ -6,6 +6,9 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}, Mutex};
 use std::time::Duration;
 use std::thread;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use vrc_chat_tool::config::AppConfig;
+use vrc_chat_tool::speech::streaming::StreamingRecognizer;
+use vrc_chat_tool::osc::sender::OscSender;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -81,6 +84,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wav_data.extend_from_slice(&pcm_data);
     std::fs::write(&output_path, &wav_data)?;
     println!("WAV saved to: {}", output_path);
+
+    // --- ASR Pipeline (--asr flag) ---
+    let run_asr = args.iter().any(|a| a == "--asr");
+    let send_osc = args.iter().any(|a| a == "--osc");
+
+    if run_asr {
+        let config = AppConfig::load().unwrap_or_default();
+
+        if config.tencent_app_id.is_empty() {
+            eprintln!("ERROR: No Tencent credentials configured");
+            std::process::exit(1);
+        }
+
+        let recognizer = StreamingRecognizer::new(
+            config.tencent_app_id.clone(),
+            config.tencent_secret_id.clone(),
+            config.tencent_secret_key.clone(),
+        );
+
+        let pcm_len = pcm_data.len();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let recognized_text = match rt.block_on(async {
+            recognizer.recognize_pcm(pcm_data, sample_rate).await
+        }) {
+            Ok(text) => text,
+            Err(e) => {
+                let result = serde_json::json!({
+                    "status": "error",
+                    "message": format!("{}", e),
+                    "pcm_bytes": pcm_len,
+                });
+                println!("{}", serde_json::to_string(&result).unwrap());
+                std::process::exit(1);
+            }
+        };
+
+        if send_osc {
+            let osc = OscSender::new(config.osc_host.clone(), config.osc_port);
+            let _ = osc.send_typing(true);
+            let _ = osc.send_chatbox(&recognized_text);
+            let _ = osc.send_typing(false);
+        }
+
+        let result = serde_json::json!({
+            "status": "ok",
+            "text": recognized_text,
+            "pcm_bytes": pcm_len,
+            "sample_rate": sample_rate,
+            "duration_secs": duration_secs,
+            "osc_sent": send_osc,
+        });
+        println!("{}", serde_json::to_string(&result).unwrap());
+
+        return Ok(());
+    }
 
     // Quick validation: check for non-silent audio
     let has_signal = pcm_data.chunks(2).any(|pair| {

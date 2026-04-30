@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod config;
-mod audio;
-mod speech;
-mod osc;
+use vrc_chat_tool::config;
+use vrc_chat_tool::audio;
+use vrc_chat_tool::speech;
+use vrc_chat_tool::osc;
 
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::thread;
@@ -158,31 +158,31 @@ fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) -> R
         let _ = app_clone.emit_all("recording-started", "");
         emit_log(&app_clone, "info", "audio", "Test recording started");
 
-        let result = capture.capture_streaming(
-            move |chunk: Vec<u8>| {
-                pcm_buffer_clone.lock().unwrap().extend_from_slice(&chunk);
-                let sum: f64 = chunk.chunks(2)
-                    .map(|pair| {
-                        let sample = i16::from_le_bytes([pair[0], pair[1]]) as f64;
-                        sample * sample
-                    }).sum();
-                let rms = (sum / (chunk.len() / 2) as f64).sqrt();
-                let volume = ((rms / 32768.0).min(1.0)) as f32;
-                let _ = app_emit.emit_all("volume-update", volume);
-            },
-            stop_signal_clone,
-        );
+        let capture_thread = thread::spawn(move || {
+            let result = capture.capture_streaming(
+                move |chunk: Vec<u8>| {
+                    pcm_buffer_clone.lock().unwrap().extend_from_slice(&chunk);
+                    let sum: f64 = chunk.chunks(2)
+                        .map(|pair| {
+                            let sample = i16::from_le_bytes([pair[0], pair[1]]) as f64;
+                            sample * sample
+                        }).sum();
+                    let rms = (sum / (chunk.len() / 2) as f64).sqrt();
+                    let volume = ((rms / 32768.0).min(1.0)) as f32;
+                    let _ = app_emit.emit_all("volume-update", volume);
+                },
+                stop_signal_clone,
+            );
+            if let Err(e) = result {
+                eprintln!("Audio capture error: {}", e);
+            }
+        });
 
         while !SHOULD_STOP.load(Ordering::SeqCst) {
             thread::sleep(std::time::Duration::from_millis(100));
         }
         stop_signal.store(true, Ordering::SeqCst);
-
-        if let Err(e) = result {
-            emit_log(&app_clone, "error", "audio", &format!("Capture error: {}", e));
-            let _ = app_clone.emit_all("recording-error", format!("{}", e));
-            return;
-        }
+        let _ = capture_thread.join();
 
         let pcm_data = pcm_buffer.lock().unwrap().clone();
         if pcm_data.is_empty() {
@@ -261,24 +261,43 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                 None => audio::capture::AudioCapture::new()?,
             };
 
-            // Shared buffer for accumulated PCM data
-            let pcm_buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
-            let pcm_buffer_clone = pcm_buffer.clone();
+            // Create channel for streaming audio chunks from capture to ASR
+            let (pcm_tx, pcm_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
             let stop_signal = Arc::new(AtomicBool::new(false));
-            let stop_signal_clone = stop_signal.clone();
-            let app_clone = app.clone();
-            let app_clone_emit = app_clone.clone();
+
+            // Bridge: monitor global SHOULD_STOP and propagate to local stop_signal
+            let s_sig = stop_signal.clone();
+            thread::spawn(move || {
+                while !SHOULD_STOP.load(Ordering::SeqCst) {
+                    thread::sleep(std::time::Duration::from_millis(100));
+                }
+                s_sig.store(true, Ordering::SeqCst);
+                SHOULD_STOP.store(false, Ordering::SeqCst);
+            });
+
+            let stop_signal_for_capture = stop_signal.clone();
+            let stop_signal_for_asr = stop_signal.clone();
+
+            // Clone app for use in capture callback and partial result callback
+            let app_for_volume = app.clone();
+            let app_for_partial = app.clone();
 
             // Emit started event
-            let _ = app_clone.emit_all("recording-started", "");
+            let _ = app.emit_all("recording-started", "");
 
-            // Start audio capture in a separate thread
+            // Build recognizer
+            let recognizer = speech::streaming::StreamingRecognizer::new(
+                cfg.tencent_app_id.clone(),
+                cfg.tencent_secret_id.clone(),
+                cfg.tencent_secret_key.clone(),
+            );
+
+            let rt = tokio::runtime::Runtime::new()?;
+
+            // Spawn audio capture in a sub-thread
             let capture_thread = thread::spawn(move || {
                 let result = capture.capture_streaming(
                     move |chunk: Vec<u8>| {
-                        // Accumulate PCM chunks
-                        pcm_buffer_clone.lock().unwrap().extend_from_slice(&chunk);
-
                         // Calculate and emit volume (simple RMS-based)
                         let sum: f64 = chunk
                             .chunks(2)
@@ -289,50 +308,35 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                             .sum();
                         let rms = (sum / (chunk.len() / 2) as f64).sqrt();
                         let volume = ((rms / 32768.0).min(1.0)) as f32;
-                        let _ = app_clone_emit.emit_all("volume-update", volume);
+                        let _ = app_for_volume.emit_all("volume-update", volume);
+
+                        // Forward audio chunk to ASR via channel
+                        let _ = pcm_tx.blocking_send(chunk);
                     },
-                    stop_signal_clone,
+                    stop_signal_for_capture,
                 );
                 if let Err(e) = result {
                     eprintln!("Audio capture error: {}", e);
                 }
             });
 
-            emit_log(&app_clone, "debug", "audio", "Audio capture stream opened");
+            emit_log(&app, "debug", "audio", "Audio capture stream opened");
 
-            // Wait for stop signal OR capture thread to finish
-            while !SHOULD_STOP.load(Ordering::SeqCst) && !stop_signal.load(Ordering::Relaxed) {
-                thread::sleep(std::time::Duration::from_millis(100));
-            }
-
-            // Signal stop to audio capture
-            SHOULD_STOP.store(false, Ordering::SeqCst);
-            stop_signal.store(true, Ordering::SeqCst);
-            let _ = capture_thread.join();
-
-            // Get accumulated PCM data
-            let pcm_data = pcm_buffer.lock().unwrap().clone();
-            if pcm_data.is_empty() {
-                return Err(anyhow::anyhow!("No audio data captured"));
-            }
-
-            // Emit partial recording event
-            let pcm_size = pcm_data.len();
-            emit_log(&app_clone, "debug", "asr", &format!("Sending {} bytes to ASR", pcm_size));
-            let _ = app_clone.emit_all("recording-partial", format!("Captured {} bytes of audio", pcm_size));
-
-            // Run ASR in a tokio runtime
-            emit_log(&app_clone, "info", "asr", "Connecting to Tencent ASR...");
-            let recognizer = speech::streaming::StreamingRecognizer::new(
-                cfg.tencent_app_id.clone(),
-                cfg.tencent_secret_id.clone(),
-                cfg.tencent_secret_key.clone(),
-            );
-
-            let rt = tokio::runtime::Runtime::new()?;
+            // Run streaming ASR in tokio runtime — sends chunks in real-time,
+            // emits partial results via callback, returns final accumulated text
             let recognized_text = rt.block_on(async {
-                recognizer.recognize_pcm(pcm_data, 16000).await
+                recognizer.recognize_pcm_stream(
+                    pcm_rx,
+                    stop_signal_for_asr,
+                    16000,
+                    move |partial_text: &str| {
+                        let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
+                    },
+                ).await
             })?;
+
+            // Wait for capture thread to finish
+            let _ = capture_thread.join();
 
             // Send via OSC
             let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);

@@ -503,3 +503,69 @@ h2 {
     width: 100%;
   }
 }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 1.5rem;
+  min-width: 400px;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #ccc;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+}
+.modal-close:hover { color: #fff; }
+
+.modal-body .test-recording-controls {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Test modal trigger button */
+.test-modal-trigger {
+  padding: 0.3rem 0.8rem;
+  background: #444;
+  color: #aaa;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.test-modal-trigger:hover { background: #555; color: #ccc; }

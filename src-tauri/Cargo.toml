@@ -27,3 +27,7 @@ urlencoding = "2"
 [[bin]]
 name = "test_e2e"
 path = "src/bin/test_e2e.rs"
+
+[lib]
+name = "vrc_chat_tool"
+path = "src/lib.rs"

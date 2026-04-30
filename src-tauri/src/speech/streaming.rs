@@ -1,6 +1,8 @@
 use anyhow::Context;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -39,6 +41,23 @@ impl StreamingRecognizer {
             secret_key,
             engine_model: "16k_zh".to_string(),
         }
+    }
+
+    /// Build the ASR WebSocket URL using the stored credentials and config
+    pub fn build_asr_url(&self, sample_rate: u32) -> String {
+        let audio_format = match sample_rate {
+            16000 => 1u8,
+            8000 => 2u8,
+            _ => 1u8,
+        };
+        crate::speech::tencent::build_asr_url(
+            &self.app_id,
+            &self.secret_id,
+            &self.secret_key,
+            &self.engine_model,
+            audio_format,
+            true,
+        )
     }
 
     pub async fn recognize_pcm(
@@ -110,6 +129,107 @@ impl StreamingRecognizer {
 
         Err(anyhow::anyhow!("No final result received"))
     }
+
+    /// Streaming ASR recognition — sends chunks as they arrive from the channel.
+    /// Returns the final accumulated recognized text.
+    pub async fn recognize_pcm_stream(
+        &self,
+        mut pcm_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+        stop_signal: Arc<AtomicBool>,
+        sample_rate: u32,
+        on_partial: impl Fn(&str) + Send + 'static,
+    ) -> anyhow::Result<String> {
+        let https_url = self.build_asr_url(sample_rate);
+        let url = https_url.replace("https://", "wss://");
+        eprintln!("[ASR Stream] Connecting to: {}", url);
+
+        let (ws_stream, _) = connect_async(&url)
+            .await
+            .context("Failed to connect to Tencent ASR WebSocket")?;
+        let (mut write, mut read) = ws_stream.split();
+
+        let mut full_text = String::new();
+
+        loop {
+            tokio::select! {
+                // Check stop signal
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)), if stop_signal.load(Ordering::Relaxed) => {
+                    break;
+                }
+                // Receive PCM chunk from channel
+                chunk_opt = pcm_rx.recv() => {
+                    match chunk_opt {
+                        Some(chunk) => {
+                            // Send chunk to ASR
+                            write.send(Message::Binary(chunk)).await?;
+
+                            // Read any available responses (non-blocking spirit)
+                            while let Ok(resp_msg) = tokio::time::timeout(
+                                std::time::Duration::from_millis(50),
+                                read.next()
+                            ).await {
+                                match resp_msg {
+                                    Some(Ok(Message::Text(text))) => {
+                                        if let Ok(resp) = serde_json::from_str::<RecogResponse>(&text) {
+                                            if resp.code != 0 {
+                                                eprintln!("[ASR Stream] Error: {} - {}", resp.code, resp.message);
+                                            }
+                                            if let Some(result) = resp.result {
+                                                match result.slice_type {
+                                                    0 => eprintln!("[ASR Stream] Started"),
+                                                    1 => {
+                                                        // Partial — emit via callback
+                                                        on_partial(&result.voice_text_str);
+                                                    }
+                                                    2 => {
+                                                        // Final segment — accumulate
+                                                        full_text.push_str(&result.voice_text_str);
+                                                        full_text.push(' ');
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Some(Ok(Message::Close(_))) => break,
+                                    _ => break,
+                                }
+                            }
+                        }
+                        None => {
+                            // Channel closed — exit loop
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Send end signal
+        write.send(Message::Text("{\"type\":\"end\"}".into())).await?;
+
+        // Read final results
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(resp) = serde_json::from_str::<RecogResponse>(&text) {
+                        if resp.code != 0 {
+                            return Err(anyhow::anyhow!("ASR error: {} - {}", resp.code, resp.message));
+                        }
+                        if let Some(result) = resp.result {
+                            if result.slice_type == 2 {
+                                full_text.push_str(&result.voice_text_str);
+                            }
+                        }
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+
+        Ok(full_text)
+    }
 }
 
 #[cfg(test)]
@@ -131,5 +251,18 @@ mod tests {
         let resp: RecogResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.code, 4001);
         assert!(resp.result.is_none());
+    }
+
+    #[test]
+    fn test_build_asr_url_format() {
+        let recognizer = StreamingRecognizer::new(
+            "12345".into(),
+            "test_id".into(),
+            "test_key".into(),
+        );
+        let url = recognizer.build_asr_url(16000);
+        assert!(url.starts_with("https://"));
+        assert!(url.contains("signature="));
+        assert!(url.contains("engine_model_type=16k_zh"));
     }
 }
