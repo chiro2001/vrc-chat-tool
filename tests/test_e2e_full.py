@@ -23,6 +23,17 @@ APP_SRC = PROJECT_ROOT / "src-tauri"
 API_BASE = "http://127.0.0.1:9876"
 
 
+def find_vb_cable_device(direction="output"):
+    """Find VB-Cable device index by name (direction: 'output'=playback, 'input'=capture)"""
+    import sounddevice as sd
+    devs = sd.query_devices()
+    search = "CABLE Input" if direction == "output" else "CABLE Output"
+    for d in devs:
+        if search in d.get('name', '') and d.get(f'max_{direction}_channels', 0) > 0:
+            return d['index']
+    raise RuntimeError(f"VB-Cable {direction} device not found")
+
+
 def generate_tts_wav(text, output_path, rate=16000):
     """Generate a WAV file with Chinese speech using Windows SAPI TTS"""
     import subprocess
@@ -79,8 +90,10 @@ def http_get(endpoint):
         return {"status": "error", "message": str(e)}
 
 
-def play_wav_to_vb_cable(wav_path, device_index=6):
-    """Play WAV file through VB-Cable output device"""
+def play_wav_to_vb_cable(wav_path, device_index=None):
+    """Play WAV file through VB-Cable output device (auto-detected if not specified)"""
+    if device_index is None:
+        device_index = find_vb_cable_device("output")
     import sounddevice as sd
     import numpy as np
 

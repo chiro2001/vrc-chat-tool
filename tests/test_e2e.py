@@ -22,6 +22,41 @@ VB_CABLE_CAPTURE_INDEX = 1    # CABLE Output (capture FROM this device, sounddev
 RUST_BIN = PROJECT_ROOT / "src-tauri" / "target" / "debug" / "test_e2e.exe"
 
 
+def find_vb_cable_device(direction="output"):
+    """Find VB-Cable device index by name (direction: 'output'=playback, 'input'=capture)"""
+    import sounddevice as sd
+    devs = sd.query_devices()
+    search = "CABLE Input" if direction == "output" else "CABLE Output"
+    for d in devs:
+        if search in d.get('name', '') and d.get(f'max_{direction}_channels', 0) > 0:
+            return d['index']
+    raise RuntimeError(f"VB-Cable {direction} device not found")
+
+
+def play_wav_to_vb_cable(wav_path, device_index=None):
+    """Play WAV file through VB-Cable output device (auto-detected if not specified)"""
+    if device_index is None:
+        device_index = find_vb_cable_device("output")
+    import sounddevice as sd
+    import numpy as np
+
+    with wave.open(str(wav_path), 'rb') as wf:
+        sample_rate = wf.getframerate()
+        n_channels = wf.getnchannels()
+        n_frames = wf.getnframes()
+        raw = wf.readframes(n_frames)
+
+    dtype = np.int16
+    audio = np.frombuffer(raw, dtype=dtype).astype(np.float32) / 32768.0
+    if n_channels > 1:
+        audio = audio.reshape(-1, n_channels)
+
+    print(f"Playing {wav_path.name} ({n_frames} frames, {sample_rate}Hz) through device {device_index}...")
+    sd.play(audio, samplerate=sample_rate, device=device_index)
+    sd.wait()
+    print("  Playback complete")
+
+
 def generate_test_tone(path, freq=440.0, duration=3.0, sample_rate=16000, amplitude=0.5):
     """Generate a sine wave WAV file with a specific frequency"""
     n_samples = int(sample_rate * duration)
@@ -64,23 +99,6 @@ def estimate_frequency_fft(samples, sample_rate):
         return freqs[mask][peak_idx]
     return 0.0
 
-
-def play_wav_to_vb_cable(wav_path, device_index=VB_CABLE_PLAYBACK_INDEX):
-    """Play WAV file through VB-Cable output device"""
-    import sounddevice as sd
-    import numpy as np
-
-    with wave.open(str(wav_path), 'rb') as wf:
-        sample_rate = wf.getframerate()
-        n_channels = wf.getnchannels()
-        n_frames = wf.getnframes()
-        raw = wf.readframes(n_frames)
-
-    # Convert to numpy array
-    dtype = np.int16
-    audio = np.frombuffer(raw, dtype=dtype).astype(np.float32) / 32768.0
-    if n_channels > 1:
-        audio = audio.reshape(-1, n_channels)
 
     print(f"Playing {wav_path.name} ({n_frames} frames, {sample_rate}Hz) through device {device_index}...")
 
