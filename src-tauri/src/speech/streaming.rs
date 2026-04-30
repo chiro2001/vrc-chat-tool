@@ -71,7 +71,7 @@ impl StreamingRecognizer {
             _ => 1u8,
         };
 
-        let https_url = crate::speech::tencent::build_asr_url(
+        let ws_url = crate::speech::tencent::build_asr_url(
             &self.app_id,
             &self.secret_id,
             &self.secret_key,
@@ -79,12 +79,13 @@ impl StreamingRecognizer {
             audio_format,
             true,
         );
-        let url = https_url.replace("https://", "wss://");
-        eprintln!("[ASR] Connecting to: {}", url);
+        eprintln!("[ASR] Connecting to: {}", ws_url);
 
-        let (ws_stream, _) = connect_async(&url)
+        let url = url::Url::parse(&ws_url)
+            .context("Failed to parse ASR URL")?;
+        let (ws_stream, _) = connect_async(url)
             .await
-            .context("Failed to connect to Tencent ASR WebSocket")?;
+            .map_err(|e| anyhow::anyhow!("ASR WebSocket connection failed: {}", e))?;
         let (mut write, mut read) = ws_stream.split();
 
         // Send PCM chunks (6400 bytes each ≈ 200ms at 16kHz 16bit mono)
@@ -139,13 +140,14 @@ impl StreamingRecognizer {
         sample_rate: u32,
         on_partial: impl Fn(&str) + Send + 'static,
     ) -> anyhow::Result<String> {
-        let https_url = self.build_asr_url(sample_rate);
-        let url = https_url.replace("https://", "wss://");
-        eprintln!("[ASR Stream] Connecting to: {}", url);
+        let ws_url = self.build_asr_url(sample_rate);
+        eprintln!("[ASR Stream] Connecting to: {}", ws_url);
 
-        let (ws_stream, _) = connect_async(&url)
+        let url = url::Url::parse(&ws_url)
+            .context("Failed to parse ASR URL")?;
+        let (ws_stream, _) = connect_async(url)
             .await
-            .context("Failed to connect to Tencent ASR WebSocket")?;
+            .map_err(|e| anyhow::anyhow!("ASR WebSocket connection failed: {}", e))?;
         let (mut write, mut read) = ws_stream.split();
 
         let mut full_text = String::new();
@@ -261,7 +263,7 @@ mod tests {
             "test_key".into(),
         );
         let url = recognizer.build_asr_url(16000);
-        assert!(url.starts_with("https://"));
+        assert!(url.starts_with("wss://"));
         assert!(url.contains("signature="));
         assert!(url.contains("engine_model_type=16k_zh"));
     }

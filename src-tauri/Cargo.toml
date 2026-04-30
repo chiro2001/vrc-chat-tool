@@ -11,7 +11,7 @@ tauri = { version = "1", features = ["path-all", "http-all", "fs-read-file", "fs
 cpal = "0.15"
 rosc = "0.7"
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.21"
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 hmac = "0.12"
 sha1 = "0.10"
@@ -23,6 +23,7 @@ anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 urlencoding = "2"
+tiny_http = "0.12"
 
 [[bin]]
 name = "test_e2e"

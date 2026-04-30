@@ -86,6 +86,10 @@ impl AudioCapture {
         Ok(Self { device, config })
     }
 
+    pub fn new_by_device(device: cpal::Device, config: cpal::StreamConfig) -> Self {
+        Self { device, config }
+    }
+
     pub fn new_by_index(index: usize) -> anyhow::Result<Self> {
         let host = cpal::default_host();
         let device = host

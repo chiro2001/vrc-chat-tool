@@ -80,18 +80,17 @@ pub fn build_asr_url(
     // Generate signature (app_id passed separately, sorted internally)
     let signature = generate_signature(secret_key, app_id, &params);
 
-    // Sort params for the URL query string
-    params.sort_by(|a, b| a.0.cmp(b.0));
-
-    let query_parts: Vec<String> = params
+    // Build URL query string — params in insertion order, RAW values (matching old working code)
+    let query_string: String = params
         .iter()
-        .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
-        .collect();
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("&");
 
     format!(
-        "https://asr.cloud.tencent.com/asr/v2/{}?{}&signature={}",
+        "wss://asr.cloud.tencent.com/asr/v2/{}?{}&signature={}",
         app_id,
-        query_parts.join("&"),
+        query_string,
         encode(&signature)
     )
 }

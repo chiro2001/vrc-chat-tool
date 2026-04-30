@@ -5,6 +5,8 @@ use vrc_chat_tool::audio;
 use vrc_chat_tool::speech;
 use vrc_chat_tool::osc;
 
+mod e2e_server;
+
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::thread;
 use tauri::Manager;
@@ -370,6 +372,12 @@ fn stop_recording() -> Result<(), String> {
 
 // --- Main Entry ---
 fn main() {
+    // Check for E2E test mode (BEFORE Tauri init)
+    if std::env::args().any(|a| a == "--e2e") {
+        e2e_server::run_e2e_server().expect("E2E server failed");
+        return;
+    }
+
     // Load config on startup
     let config = config::AppConfig::load().unwrap_or_default();
     *CURRENT_CONFIG.lock().unwrap() = Some(config);
