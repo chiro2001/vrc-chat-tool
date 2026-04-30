@@ -127,7 +127,7 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
 
     let capture = AudioCapture::new_by_index(vb_cable.index)?;
 
-    let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+    let (pcm_tx, pcm_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
     let stop_signal = Arc::new(AtomicBool::new(false));
 
     // Bridge: monitor SHOULD_STOP_E2E

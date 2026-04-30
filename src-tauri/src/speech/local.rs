@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
-use anyhow::Context;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

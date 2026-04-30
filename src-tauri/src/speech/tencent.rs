@@ -66,7 +66,7 @@ pub fn build_asr_url(
     let nonce_str = nonce.to_string();
 
     // Params for signing and URL (appid is NOT in params — it goes in the URL path)
-    let mut params: Vec<(&str, &str)> = vec![
+    let params: Vec<(&str, &str)> = vec![
         ("secretid", secret_id),
         ("timestamp", &timestamp_str),
         ("expired", &expired_str),
