@@ -12,9 +12,13 @@ static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new
             timestamp TEXT NOT NULL,
             text TEXT NOT NULL,
             source TEXT NOT NULL DEFAULT 'asr'
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );",
     )
-    .expect("Failed to create table");
+    .expect("Failed to create tables");
     Mutex::new(conn)
 });
 
@@ -69,4 +73,35 @@ pub fn get_recent(limit: usize) -> Vec<HistoryEntry> {
 pub fn clear_all() {
     let conn = DB.lock().unwrap();
     conn.execute("DELETE FROM recognition_history", []).ok();
+}
+
+// ---- Settings (key-value) ----
+
+pub fn get_setting(key: &str) -> Option<String> {
+    let conn = DB.lock().unwrap();
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+pub fn set_setting(key: &str, value: &str) {
+    let conn = DB.lock().unwrap();
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        params![key, value],
+    )
+    .ok();
+}
+
+pub fn get_audio_device_index() -> usize {
+    get_setting("audio_device_index")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+pub fn set_audio_device_index(index: usize) {
+    set_setting("audio_device_index", &index.to_string());
 }

@@ -396,6 +396,16 @@ fn stop_recording() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_saved_device_index() -> usize {
+    history::get_audio_device_index()
+}
+
+#[tauri::command]
+fn save_device_index(index: usize) {
+    history::set_audio_device_index(index);
+}
+
 // --- Main Entry ---
 fn main() {
     // Check for E2E test mode (BEFORE Tauri init)

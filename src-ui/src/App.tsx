@@ -79,6 +79,11 @@ function App() {
       })
       .catch(console.error);
 
+    // Load saved device index from DB
+    invoke<number>("get_saved_device_index")
+      .then((idx) => setSelectedDeviceIndex(idx))
+      .catch(() => {});
+
     // Load recognition history
     loadHistory();
   }, []);
@@ -238,7 +243,11 @@ function App() {
           <label>{t("control.audioDevice")}</label>
           <select
             value={selectedDeviceIndex}
-            onChange={(e) => setSelectedDeviceIndex(Number(e.target.value))}
+            onChange={(e) => {
+              const idx = Number(e.target.value);
+              setSelectedDeviceIndex(idx);
+              invoke("save_device_index", { index: idx }).catch(() => {});
+            }}
           >
             {audioDevices.map((d) => (
               <option key={d.index} value={d.index}>
