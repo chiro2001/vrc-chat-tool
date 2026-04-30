@@ -288,6 +288,10 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // Emit started event
             let _ = app.emit_all("recording-started", "");
 
+            // Show typing indicator in VRChat
+            let osc_typing = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
+            let _ = osc_typing.send_typing(true);
+
             // Build recognizer
             let recognizer = speech::streaming::StreamingRecognizer::new(
                 cfg.tencent_app_id.clone(),
