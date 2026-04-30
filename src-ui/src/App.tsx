@@ -33,11 +33,15 @@ function App() {
   const [testRecordings, setTestRecordings] = useState<any[]>([]);
   const [isTestRecording, setIsTestRecording] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
 
   // Log panel state
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   const [logFilter, setLogFilter] = useState<string>("all");
+
+  // Recognition history
+  const [recognitionHistory, setRecognitionHistory] = useState<any[]>([]);
 
   // Audio devices
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
@@ -68,6 +72,9 @@ function App() {
         setAudioDevices(devices);
       })
       .catch(console.error);
+
+    // Load recognition history
+    loadHistory();
   }, []);
 
   // Set up event listeners
@@ -92,6 +99,7 @@ function App() {
       setCurrentPartial("");
       // Refresh recordings list when a test recording completes
       invoke<any[]>("list_test_recordings").then(setTestRecordings).catch(console.error);
+      loadHistory();
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-error", (event) => {
@@ -185,6 +193,15 @@ function App() {
     [config]
   );
 
+  // Recognition history
+  const loadHistory = useCallback(() => {
+    invoke<any[]>("get_recognition_history").then(setRecognitionHistory).catch(console.error);
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    invoke("clear_recognition_history").then(() => setRecognitionHistory([])).catch(console.error);
+  }, []);
+
   const isRecording = apiState === "recording" || apiState === "recognizing";
 
   return (
@@ -240,6 +257,9 @@ function App() {
         <button className="test-modal-trigger" onClick={() => setShowTestModal(true)}>
           {t("test.title")}
         </button>
+        <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
+          {t("config.title")}
+        </button>
 
         <button
           className={`record-button ${isRecording ? "recording" : ""}`}
@@ -269,6 +289,25 @@ function App() {
             <span className="text">{lastError}</span>
           </div>
         )}
+      </section>
+
+      {/* Recognition History */}
+      <section className="history-panel">
+        <h2>{t("history.title")}</h2>
+        {recognitionHistory.length === 0 ? (
+          <p className="history-empty">{t("history.empty")}</p>
+        ) : (
+          <div className="history-list">
+            {recognitionHistory.map((entry: any) => (
+              <div key={entry.id} className="history-entry">
+                <span className="history-time">{entry.timestamp}</span>
+                <span className="history-text">{entry.text}</span>
+                <span className="history-source">{entry.source}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <button className="history-clear" onClick={clearHistory}>{t("history.clear")}</button>
       </section>
 
       {/* Test Recording Modal */}
@@ -319,52 +358,41 @@ function App() {
         </div>
       )}
 
-      {/* Configuration */}
-      <section className="config-panel">
-        <h2>{t("config.tencent")}</h2>
-        <div className="config-field">
-          <label>{t("config.appId")}</label>
-          <input
-            type="text"
-            value={config.tencent_app_id}
-            onChange={(e) => updateConfig("tencent_app_id", e.target.value)}
-            placeholder="REDACTED_APPID"
-          />
+      {/* Config Modal */}
+      {showConfigModal && (
+        <div className="modal-overlay" onClick={() => setShowConfigModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{t("config.title")}</h2>
+              <button className="modal-close" onClick={() => setShowConfigModal(false)}>X</button>
+            </div>
+            <div className="modal-body">
+              <h3>{t("config.tencent")}</h3>
+              <div className="config-field">
+                <label>{t("config.appId")}</label>
+                <input type="text" value={config.tencent_app_id} onChange={(e) => updateConfig("tencent_app_id", e.target.value)} placeholder="REDACTED_APPID" />
+              </div>
+              <div className="config-field">
+                <label>{t("config.secretId")}</label>
+                <input type="text" value={config.tencent_secret_id} onChange={(e) => updateConfig("tencent_secret_id", e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.secretKey")}</label>
+                <input type="password" value={config.tencent_secret_key} onChange={(e) => updateConfig("tencent_secret_key", e.target.value)} />
+              </div>
+              <h3>{t("config.osc")}</h3>
+              <div className="config-field">
+                <label>{t("config.host")}</label>
+                <input type="text" value={config.osc_host} onChange={(e) => updateConfig("osc_host", e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.port")}</label>
+                <input type="number" value={config.osc_port} onChange={(e) => updateConfig("osc_port", Number(e.target.value))} />
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="config-field">
-          <label>{t("config.secretId")}</label>
-          <input
-            type="text"
-            value={config.tencent_secret_id}
-            onChange={(e) => updateConfig("tencent_secret_id", e.target.value)}
-          />
-        </div>
-        <div className="config-field">
-          <label>{t("config.secretKey")}</label>
-          <input
-            type="password"
-            value={config.tencent_secret_key}
-            onChange={(e) => updateConfig("tencent_secret_key", e.target.value)}
-          />
-        </div>
-        <h2>{t("config.osc")}</h2>
-        <div className="config-field">
-          <label>{t("config.host")}</label>
-          <input
-            type="text"
-            value={config.osc_host}
-            onChange={(e) => updateConfig("osc_host", e.target.value)}
-          />
-        </div>
-        <div className="config-field">
-          <label>{t("config.port")}</label>
-          <input
-            type="number"
-            value={config.osc_port}
-            onChange={(e) => updateConfig("osc_port", Number(e.target.value))}
-          />
-        </div>
-      </section>
+      )}
 
       {/* Log Panel */}
       <div className="log-panel-wrapper">

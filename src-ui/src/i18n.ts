@@ -26,6 +26,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "test.play": "播放",
     "test.delete": "删除",
     "test.savedAlert": "录音已保存至:",
+    "config.title": "设置",
     "config.tencent": "腾讯云配置",
     "config.appId": "App ID:",
     "config.secretId": "Secret ID:",
@@ -47,6 +48,9 @@ const translations: Record<Lang, Record<string, string>> = {
     "recording.noAudio": "未捕获到音频数据",
     "recording.failed": "录音失败",
     "recording.configNeeded": "请先配置腾讯云凭证",
+    "history.title": "历史记录",
+    "history.empty": "暂无记录",
+    "history.clear": "清除",
   },
   en: {
     "app.title": "VRC Voice OSC",
@@ -69,6 +73,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "test.play": "Play",
     "test.delete": "Delete",
     "test.savedAlert": "Recording saved at:",
+    "config.title": "Settings",
     "config.tencent": "Tencent Cloud Config",
     "config.appId": "App ID:",
     "config.secretId": "Secret ID:",
@@ -90,6 +95,9 @@ const translations: Record<Lang, Record<string, string>> = {
     "recording.noAudio": "No audio data captured",
     "recording.failed": "Recording failed",
     "recording.configNeeded": "Please configure Tencent Cloud credentials",
+    "history.title": "History",
+    "history.empty": "No history",
+    "history.clear": "Clear",
   },
 };
 

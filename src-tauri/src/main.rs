@@ -6,6 +6,7 @@ use vrc_chat_tool::speech;
 use vrc_chat_tool::osc;
 
 mod e2e_server;
+mod history;
 
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::thread;
@@ -352,6 +353,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
         match result {
             Ok(text) => {
                 emit_log(&app, "info", "asr", &format!("Recognition result: {}", text));
+                history::add_entry(&text, "asr");
                 let _ = app.emit_all("recording-complete", text);
             }
             Err(e) => {
@@ -362,6 +364,16 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
     });
 
     Ok(())
+}
+
+#[tauri::command]
+fn get_recognition_history() -> Vec<history::HistoryEntry> {
+    history::get_recent(100)
+}
+
+#[tauri::command]
+fn clear_recognition_history() {
+    history::clear_all();
 }
 
 #[tauri::command]
@@ -395,6 +407,8 @@ fn main() {
             get_recent_logs,
             clear_logs,
             start_test_recording,
+            get_recognition_history,
+            clear_recognition_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
