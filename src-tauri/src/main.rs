@@ -336,6 +336,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                 let osc_for_sentence = Arc::new(osc::sender::OscSender::new(
                     cfg.osc_host.clone(), cfg.osc_port,
                 ));
+                let osc_for_partial = osc_for_sentence.clone();
                 let osc_s = osc_for_sentence.clone();
                 recognizer.recognize_pcm_stream(
                     pcm_rx,
@@ -343,6 +344,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                     16000,
                     move |partial_text: &str| {
                         let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
+                        let _ = osc_for_partial.send_partial(partial_text);
                     },
                     move |sentence_text: &str| {
                         let _ = app_sentence.emit_all("recording-sentence", sentence_text.to_string());
