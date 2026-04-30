@@ -1,0 +1,19 @@
+PicoCCB/
+
+node_modules/
+target/
+dist/
+
+# Logs
+*.log
+.env
+.env.local
+
+# Temp
+tmp/
+*.wav
+*.pcm
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,37 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devPath": "http://localhost:5173",
+    "distDir": "../dist",
+    "beforeBuildCommand": "npm run build"
+  },
+  "package": {
+    "productName": "vrc-chat-tool",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "path": { "all": true },
+      "http": { "all": true, "scope": ["http://**", "https://**"] },
+      "fs": { "readFile": true, "writeFile": true, "scope": ["$APPDATA/**", "$RESOURCE/**"] },
+      "clipboard": { "all": true }
+    },
+    "bundle": {
+      "active": true,
+      "identifier": "com.vrcchattool.app",
+      "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"]
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "VRC Voice OSC",
+        "width": 800,
+        "height": 600,
+        "minWidth": 500,
+        "minHeight": 400
+      }
+    ]
+  }
+}
