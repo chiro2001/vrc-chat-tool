@@ -329,6 +329,10 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // emits partial results via callback, returns final accumulated text
             let recognized_text = rt.block_on(async {
                 let app_sentence = app.clone();
+                let osc_for_sentence = Arc::new(osc::sender::OscSender::new(
+                    cfg.osc_host.clone(), cfg.osc_port,
+                ));
+                let osc_s = osc_for_sentence.clone();
                 recognizer.recognize_pcm_stream(
                     pcm_rx,
                     stop_signal_for_asr,
@@ -338,6 +342,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                     },
                     move |sentence_text: &str| {
                         let _ = app_sentence.emit_all("recording-sentence", sentence_text.to_string());
+                        let _ = osc_s.send_chatbox(sentence_text);
                         history::add_entry(sentence_text, "asr");
                     },
                 ).await
@@ -346,10 +351,8 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // Wait for capture thread to finish
             let _ = capture_thread.join();
 
-            // Send via OSC
+            // Final OSC: just turn off typing indicator (sentences already sent in real-time)
             let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
-            osc.send_typing(true)?;
-            osc.send_chatbox(&recognized_text)?;
             osc.send_typing(false)?;
 
             Ok(recognized_text)

@@ -204,8 +204,8 @@ impl StreamingRecognizer {
                                                         if !s.is_empty() {
                                                             eprintln!("[ASR Stream] API final: {}", s);
                                                             on_sentence(&s);
-                                                            full_text.push_str(&s);
-                                                            full_text.push(' ');
+                                                        full_text.push_str(&s);
+                                                        full_text.push('\n');
                                                         }
                                                         sentence_text.clear();
                                                     }
