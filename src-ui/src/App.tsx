@@ -11,6 +11,8 @@ interface AppConfig {
   tencent_secret_key: string;
   osc_host: string;
   osc_port: number;
+  osc_line_count: number;
+  osc_retention_secs: number;
 }
 
 interface AudioDevice {
@@ -54,6 +56,8 @@ function App() {
     tencent_secret_key: "",
     osc_host: "127.0.0.1",
     osc_port: 9000,
+    osc_line_count: 2,
+    osc_retention_secs: 5,
   });
 
   // Load config on mount
@@ -388,6 +392,14 @@ function App() {
               <div className="config-field">
                 <label>{t("config.port")}</label>
                 <input type="number" value={config.osc_port} onChange={(e) => updateConfig("osc_port", Number(e.target.value))} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.lineCount")}</label>
+                <input type="number" value={config.osc_line_count} min="1" max="10" onChange={(e) => updateConfig("osc_line_count", Number(e.target.value))} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.retentionSecs")}</label>
+                <input type="number" value={config.osc_retention_secs} min="1" max="60" onChange={(e) => updateConfig("osc_retention_secs", Number(e.target.value))} />
               </div>
             </div>
           </div>

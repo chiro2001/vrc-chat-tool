@@ -333,8 +333,9 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // emits partial results via callback, returns final accumulated text
             let recognized_text = rt.block_on(async {
                 let app_sentence = app.clone();
-                let osc_for_sentence = Arc::new(osc::sender::OscSender::new(
+                let osc_for_sentence = Arc::new(osc::sender::OscSender::with_config(
                     cfg.osc_host.clone(), cfg.osc_port,
+                    cfg.osc_line_count, cfg.osc_retention_secs,
                 ));
                 let osc_for_partial = osc_for_sentence.clone();
                 let osc_s = osc_for_sentence.clone();

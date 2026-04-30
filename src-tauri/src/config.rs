@@ -10,6 +10,8 @@ pub struct AppConfig {
     pub tencent_secret_key: String,
     pub osc_host: String,
     pub osc_port: u16,
+    pub osc_line_count: usize,
+    pub osc_retention_secs: u64,
 }
 
 impl Default for AppConfig {
@@ -20,6 +22,8 @@ impl Default for AppConfig {
             tencent_secret_key: "REDACTED_SECRET_KEY".to_string(),
             osc_host: "127.0.0.1".to_string(),
             osc_port: 9000,
+            osc_line_count: 2,
+            osc_retention_secs: 5,
         }
     }
 }
