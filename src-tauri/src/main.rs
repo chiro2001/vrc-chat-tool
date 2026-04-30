@@ -328,12 +328,17 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // Run streaming ASR in tokio runtime — sends chunks in real-time,
             // emits partial results via callback, returns final accumulated text
             let recognized_text = rt.block_on(async {
+                let app_sentence = app.clone();
                 recognizer.recognize_pcm_stream(
                     pcm_rx,
                     stop_signal_for_asr,
                     16000,
                     move |partial_text: &str| {
                         let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
+                    },
+                    move |sentence_text: &str| {
+                        let _ = app_sentence.emit_all("recording-sentence", sentence_text.to_string());
+                        history::add_entry(sentence_text, "asr");
                     },
                 ).await
             })?;

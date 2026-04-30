@@ -155,22 +155,10 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
         }
     });
 
-    let _ = capture_thread.join();
+    // Run ASR in streaming mode with sentence boundary detection
+    let sentences: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let sentences_clone = sentences.clone();
 
-    // Collect all PCM data from channel (batch mode)
-    let mut all_pcm = Vec::new();
-    while let Ok(chunk) = pcm_rx.try_recv() {
-        all_pcm.extend_from_slice(&chunk);
-    }
-    // Get remaining data from buffer
-    drop(pcm_rx);
-
-    eprintln!("[E2E] Collected {} bytes of PCM data", all_pcm.len());
-    if all_pcm.is_empty() {
-        return Err("No audio data captured".into());
-    }
-
-    // Run ASR in batch mode
     let recognizer = StreamingRecognizer::new(
         cfg.tencent_app_id.clone(),
         cfg.tencent_secret_id.clone(),
@@ -179,8 +167,26 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
 
     let rt = tokio::runtime::Runtime::new()?;
     let recognized_text = rt.block_on(async {
-        recognizer.recognize_pcm(all_pcm, 16000).await
+        recognizer.recognize_pcm_stream(
+            pcm_rx,
+            asr_stop,
+            16000,
+            |_partial| {},
+            move |sentence: &str| {
+                let s = sentence.trim().to_string();
+                if !s.is_empty() {
+                    eprintln!("[E2E] Sentence: {}", s);
+                    sentences_clone.lock().unwrap().push(s);
+                }
+            },
+        ).await
     })?;
+
+    let _ = capture_thread.join();
+
+    eprintln!("[E2E] Recognition result: {}", recognized_text);
+    let sentences_final = sentences.lock().unwrap().clone();
+    eprintln!("[E2E] Sentences detected: {:?}", sentences_final);
 
     // Send via OSC
     let osc = OscSender::new(cfg.osc_host.clone(), cfg.osc_port);

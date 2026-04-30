@@ -129,12 +129,15 @@ impl StreamingRecognizer {
 
     /// Streaming ASR recognition — sends chunks as they arrive from the channel.
     /// Returns the final accumulated recognized text.
+    /// `on_partial` is called for each real-time partial result (slice_type=1).
+    /// `on_sentence` is called when a sentence boundary is detected (API final OR 1.5s silence).
     pub async fn recognize_pcm_stream(
         &self,
         mut pcm_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
         stop_signal: Arc<AtomicBool>,
         sample_rate: u32,
         on_partial: impl Fn(&str) + Send + 'static,
+        on_sentence: impl Fn(&str) + Send + 'static,
     ) -> anyhow::Result<String> {
         let ws_url = self.build_asr_url(sample_rate);
         eprintln!("[ASR Stream] Connecting to: {}", ws_url);
@@ -147,15 +150,29 @@ impl StreamingRecognizer {
         let (mut write, mut read) = ws_stream.split();
 
         let mut full_text = String::new();
+        let mut sentence_text = String::new();
+        let mut last_audio_time = tokio::time::Instant::now();
+        let silence_timeout = std::time::Duration::from_millis(1500);
+        let tick = std::time::Duration::from_millis(200);
 
         loop {
             tokio::select! {
                 // Check stop signal
-                _ = tokio::time::sleep(std::time::Duration::from_millis(100)), if stop_signal.load(Ordering::Relaxed) => {
+                _ = tokio::time::sleep(tick), if stop_signal.load(Ordering::Relaxed) => {
                     break;
+                }
+                // Silence-based sentence boundary detection
+                _ = tokio::time::sleep(tick) => {
+                    if !sentence_text.is_empty()
+                        && last_audio_time.elapsed() > silence_timeout {
+                        eprintln!("[ASR Stream] Silence boundary: {}", sentence_text);
+                        on_sentence(&sentence_text);
+                        sentence_text.clear();
+                    }
                 }
                 // Receive PCM chunk from channel
                 chunk_opt = pcm_rx.recv() => {
+                    last_audio_time = tokio::time::Instant::now();
                     match chunk_opt {
                         Some(chunk) => {
                             // Send chunk to ASR
@@ -178,11 +195,19 @@ impl StreamingRecognizer {
                                                     1 => {
                                                         // Partial — emit via callback
                                                         on_partial(&result.voice_text_str);
+                                                        sentence_text = result.voice_text_str.clone();
+                                                        last_audio_time = tokio::time::Instant::now();
                                                     }
                                                     2 => {
-                                                        // Final segment — accumulate
-                                                        full_text.push_str(&result.voice_text_str);
-                                                        full_text.push(' ');
+                                                        // API final sentence — emit immediately
+                                                        let s = result.voice_text_str.trim().to_string();
+                                                        if !s.is_empty() {
+                                                            eprintln!("[ASR Stream] API final: {}", s);
+                                                            on_sentence(&s);
+                                                            full_text.push_str(&s);
+                                                            full_text.push(' ');
+                                                        }
+                                                        sentence_text.clear();
                                                     }
                                                     _ => {}
                                                 }
