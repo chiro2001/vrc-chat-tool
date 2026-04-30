@@ -13,6 +13,7 @@ pub struct OscSender {
     port: u16,
     line_count: usize,
     retention_secs: u64,
+    remove_period: bool,
     buffer: Mutex<Vec<OutputMessage>>,
     last_sent: Mutex<String>,
 }
@@ -24,17 +25,19 @@ impl OscSender {
             port,
             line_count: 2,
             retention_secs: 5,
+            remove_period: true,
             buffer: Mutex::new(Vec::new()),
             last_sent: Mutex::new(String::new()),
         }
     }
 
-    pub fn with_config(host: String, port: u16, line_count: usize, retention_secs: u64) -> Self {
+    pub fn with_config(host: String, port: u16, line_count: usize, retention_secs: u64, remove_period: bool) -> Self {
         Self {
             host,
             port,
             line_count: line_count.max(1),
             retention_secs,
+            remove_period,
             buffer: Mutex::new(Vec::new()),
             last_sent: Mutex::new(String::new()),
         }
@@ -47,6 +50,11 @@ impl OscSender {
             .as_millis() as u64
     }
 
+    fn strip_trailing_punctuation(text: &str) -> String {
+        let punct = "。，！？；：、,.;:!?~～…—";
+        text.trim_end_matches(|c: char| punct.contains(c)).to_string()
+    }
+
     /// Send a final (complete) sentence — adds to buffer and sends combined text
     pub fn send_chatbox(&self, text: &str) -> anyhow::Result<()> {
         let text = text.trim().to_string();
@@ -54,11 +62,17 @@ impl OscSender {
             return Ok(());
         }
 
+        let display_text = if self.remove_period {
+            Self::strip_trailing_punctuation(&text)
+        } else {
+            text.clone()
+        };
+
         let now = Self::now_ms();
         let combined = {
             let mut buf = self.buffer.lock().unwrap();
             buf.push(OutputMessage {
-                text: text.clone(),
+                text: display_text.clone(),
                 timestamp: now,
             });
 

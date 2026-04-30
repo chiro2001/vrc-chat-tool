@@ -13,6 +13,7 @@ interface AppConfig {
   osc_port: number;
   osc_line_count: number;
   osc_retention_secs: number;
+  osc_remove_period: boolean;
 }
 
 interface AudioDevice {
@@ -58,6 +59,7 @@ function App() {
     osc_port: 9000,
     osc_line_count: 2,
     osc_retention_secs: 5,
+    osc_remove_period: true,
   });
 
   // Load config on mount
@@ -189,7 +191,7 @@ function App() {
 
   // Save config on change
   const updateConfig = useCallback(
-    (field: keyof AppConfig, value: string | number) => {
+    (field: keyof AppConfig, value: string | number | boolean) => {
       const newConfig = { ...config, [field]: value };
       setConfig(newConfig);
       invoke("save_config", { config: newConfig }).catch(console.error);
@@ -400,6 +402,12 @@ function App() {
               <div className="config-field">
                 <label>{t("config.retentionSecs")}</label>
                 <input type="number" value={config.osc_retention_secs} min="1" max="60" onChange={(e) => updateConfig("osc_retention_secs", Number(e.target.value))} />
+              </div>
+              <div className="config-field">
+                <label>
+                  <input type="checkbox" checked={config.osc_remove_period} onChange={(e) => updateConfig("osc_remove_period", e.target.checked)} />
+                  {t("config.removePeriod")}
+                </label>
               </div>
             </div>
           </div>

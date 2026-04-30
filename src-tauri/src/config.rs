@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub osc_port: u16,
     pub osc_line_count: usize,
     pub osc_retention_secs: u64,
+    pub osc_remove_period: bool,
 }
 
 impl Default for AppConfig {
@@ -24,6 +25,7 @@ impl Default for AppConfig {
             osc_port: 9000,
             osc_line_count: 2,
             osc_retention_secs: 5,
+            osc_remove_period: true,
         }
     }
 }

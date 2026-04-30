@@ -335,7 +335,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                 let app_sentence = app.clone();
                 let osc_for_sentence = Arc::new(osc::sender::OscSender::with_config(
                     cfg.osc_host.clone(), cfg.osc_port,
-                    cfg.osc_line_count, cfg.osc_retention_secs,
+                    cfg.osc_line_count, cfg.osc_retention_secs, cfg.osc_remove_period,
                 ));
                 let osc_for_partial = osc_for_sentence.clone();
                 let osc_s = osc_for_sentence.clone();
