@@ -16,7 +16,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "control.volume": "音量:",
     "control.startRecording": "开始录音",
     "control.stop": "停止",
-    "results.listening": "正在听:",
+    "results.listening": "识别中:",
     "results.result": "结果:",
     "results.error": "错误:",
     "test.title": "录音测试",

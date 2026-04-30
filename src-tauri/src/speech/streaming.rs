@@ -97,33 +97,29 @@ impl StreamingRecognizer {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
-        // Signal end of audio
-        write
-            .send(Message::Text("{\"type\":\"end\"}".into()))
-            .await
-            .context("Failed to send end signal")?;
+        // Signal end of audio (ignore error if already closed)
+        let _ = write.send(Message::Text("{\"type\":\"end\"}".into())).await;
+        let _ = write.close().await;
 
-        // Read responses until we get final result
+        // Read responses until we get final result (gracefully)
         while let Some(msg) = read.next().await {
-            match msg? {
-                Message::Text(text) => {
-                    let resp: RecogResponse = serde_json::from_str(&text)
-                        .context("Failed to parse ASR response JSON")?;
-
-                    if resp.code != 0 {
-                        return Err(anyhow::anyhow!("ASR error: {}", resp.message));
-                    }
-
-                    if let Some(result) = resp.result {
-                        match result.slice_type {
-                            0 => eprintln!("[ASR] Started"),
-                            1 => eprintln!("[ASR] Partial: {}", result.voice_text_str),
-                            2 => return Ok(result.voice_text_str),
-                            _ => {}
+            match msg {
+                Ok(Message::Text(text)) => {
+                    if let Ok(resp) = serde_json::from_str::<RecogResponse>(&text) {
+                        if resp.code != 0 {
+                            eprintln!("[ASR] Error response: {} - {}", resp.code, resp.message);
+                        }
+                        if let Some(result) = resp.result {
+                            match result.slice_type {
+                                0 => eprintln!("[ASR] Started"),
+                                1 => eprintln!("[ASR] Partial: {}", result.voice_text_str),
+                                2 => return Ok(result.voice_text_str),
+                                _ => {}
+                            }
                         }
                     }
                 }
-                Message::Close(_) => break,
+                Ok(Message::Close(_)) | Err(_) => break,
                 _ => {}
             }
         }
@@ -207,16 +203,17 @@ impl StreamingRecognizer {
             }
         }
 
-        // Send end signal
-        write.send(Message::Text("{\"type\":\"end\"}".into())).await?;
+        // Send end signal (ignore error if connection already closed)
+        let _ = write.send(Message::Text("{\"type\":\"end\"}".into())).await;
+        let _ = write.close().await;
 
-        // Read final results
+        // Read final results gracefully
         while let Some(msg) = read.next().await {
-            match msg? {
-                Message::Text(text) => {
+            match msg {
+                Ok(Message::Text(text)) => {
                     if let Ok(resp) = serde_json::from_str::<RecogResponse>(&text) {
                         if resp.code != 0 {
-                            return Err(anyhow::anyhow!("ASR error: {} - {}", resp.code, resp.message));
+                            eprintln!("[ASR Stream] Final error: {} - {}", resp.code, resp.message);
                         }
                         if let Some(result) = resp.result {
                             if result.slice_type == 2 {
@@ -225,7 +222,7 @@ impl StreamingRecognizer {
                         }
                     }
                 }
-                Message::Close(_) => break,
+                Ok(Message::Close(_)) | Err(_) => break,
                 _ => {}
             }
         }
