@@ -397,13 +397,13 @@ fn stop_recording() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_saved_device_index() -> usize {
-    history::get_audio_device_index()
+fn get_saved_device_index() -> u32 {
+    history::get_audio_device_index() as u32
 }
 
 #[tauri::command]
-fn save_device_index(index: usize) {
-    history::set_audio_device_index(index);
+fn save_device_index(device_idx: u32) {
+    history::set_audio_device_index(device_idx as usize);
 }
 
 // --- Main Entry ---
@@ -433,6 +433,8 @@ fn main() {
             start_test_recording,
             get_recognition_history,
             clear_recognition_history,
+            get_saved_device_index,
+            save_device_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

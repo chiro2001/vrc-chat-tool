@@ -246,7 +246,7 @@ function App() {
             onChange={(e) => {
               const idx = Number(e.target.value);
               setSelectedDeviceIndex(idx);
-              invoke("save_device_index", { index: idx }).catch(() => {});
+              invoke("save_device_index", { deviceIdx: idx }).catch(() => {});
             }}
           >
             {audioDevices.map((d) => (
