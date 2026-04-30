@@ -361,7 +361,6 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
         match result {
             Ok(text) => {
                 emit_log(&app, "info", "asr", &format!("Recognition result: {}", text));
-                history::add_entry(&text, "asr");
                 let _ = app.emit_all("recording-complete", text);
             }
             Err(e) => {

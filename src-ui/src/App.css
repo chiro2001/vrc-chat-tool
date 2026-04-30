@@ -250,6 +250,7 @@ header h1 {
 .final-result .text {
   color: #bbdefb;
   font-weight: 600;
+  white-space: pre-wrap;
 }
 
 .error-result {
