@@ -292,12 +292,20 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             let osc_typing = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
             let _ = osc_typing.send_typing(true);
 
-            // Build recognizer
-            let recognizer = speech::streaming::StreamingRecognizer::new(
-                cfg.tencent_app_id.clone(),
-                cfg.tencent_secret_id.clone(),
-                cfg.tencent_secret_key.clone(),
-            );
+            // Build recognizer (Tencent Cloud or Local STT)
+            let recognizer = if cfg.asr_provider == "local" {
+                speech::recognizer::Recognizer::Local(
+                    speech::local::LocalRecognizer::new(cfg.local_stt_url.clone())
+                )
+            } else {
+                speech::recognizer::Recognizer::Tencent(
+                    speech::streaming::StreamingRecognizer::new(
+                        cfg.tencent_app_id.clone(),
+                        cfg.tencent_secret_id.clone(),
+                        cfg.tencent_secret_key.clone(),
+                    )
+                )
+            };
 
             let rt = tokio::runtime::Runtime::new()?;
 
@@ -329,8 +337,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
 
             emit_log(&app, "debug", "audio", "Audio capture stream opened");
 
-            // Run streaming ASR in tokio runtime — sends chunks in real-time,
-            // emits partial results via callback, returns final accumulated text
+            // Run streaming ASR via unified recognizer
             let recognized_text = rt.block_on(async {
                 let app_sentence = app.clone();
                 let osc_for_sentence = Arc::new(osc::sender::OscSender::with_config(
@@ -342,7 +349,6 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                 recognizer.recognize_pcm_stream(
                     pcm_rx,
                     stop_signal_for_asr,
-                    16000,
                     move |partial_text: &str| {
                         let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
                         let _ = osc_for_partial.send_partial(partial_text);

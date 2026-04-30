@@ -14,6 +14,8 @@ interface AppConfig {
   osc_line_count: number;
   osc_retention_secs: number;
   osc_remove_period: boolean;
+  asr_provider: string;
+  local_stt_url: string;
 }
 
 interface AudioDevice {
@@ -60,6 +62,8 @@ function App() {
     osc_line_count: 2,
     osc_retention_secs: 5,
     osc_remove_period: true,
+    asr_provider: "tencent",
+    local_stt_url: "ws://192.168.101.7:8765",
   });
 
   // Load config on mount
@@ -382,7 +386,22 @@ function App() {
               <button className="modal-close" onClick={() => setShowConfigModal(false)}>X</button>
             </div>
             <div className="modal-body">
-              <h3>{t("config.tencent")}</h3>
+              <div className="config-field">
+                <label>{t("config.provider")}</label>
+                <select value={config.asr_provider} onChange={(e) => updateConfig("asr_provider", e.target.value)}>
+                  <option value="tencent">{t("config.providerTencent")}</option>
+                  <option value="local">{t("config.providerLocal")}</option>
+                </select>
+              </div>
+
+              {config.asr_provider === "local" ? (
+                <div className="config-field">
+                  <label>{t("config.localSttUrl")}</label>
+                  <input type="text" value={config.local_stt_url} onChange={(e) => updateConfig("local_stt_url", e.target.value)} />
+                </div>
+              ) : (
+                <>
+                  <h3>{t("config.tencent")}</h3>
               <div className="config-field">
                 <label>{t("config.appId")}</label>
                 <input type="text" value={config.tencent_app_id} onChange={(e) => updateConfig("tencent_app_id", e.target.value)} placeholder="REDACTED_APPID" />
@@ -395,6 +414,8 @@ function App() {
                 <label>{t("config.secretKey")}</label>
                 <input type="password" value={config.tencent_secret_key} onChange={(e) => updateConfig("tencent_secret_key", e.target.value)} />
               </div>
+                </>
+              )}
               <h3>{t("config.osc")}</h3>
               <div className="config-field">
                 <label>{t("config.host")}</label>

@@ -13,6 +13,8 @@ pub struct AppConfig {
     pub osc_line_count: usize,
     pub osc_retention_secs: u64,
     pub osc_remove_period: bool,
+    pub asr_provider: String,
+    pub local_stt_url: String,
 }
 
 impl Default for AppConfig {
@@ -26,6 +28,8 @@ impl Default for AppConfig {
             osc_line_count: 2,
             osc_retention_secs: 5,
             osc_remove_period: true,
+            asr_provider: "tencent".to_string(),
+            local_stt_url: "ws://192.168.101.7:8765".to_string(),
         }
     }
 }
