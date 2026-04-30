@@ -159,10 +159,11 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
     let sentences: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let sentences_clone = sentences.clone();
 
+    let creds = vrc_chat_tool::config::TencentCredentials::load(&cfg.tencent_credentials_file);
     let recognizer = StreamingRecognizer::new(
-        cfg.tencent_app_id.clone(),
-        cfg.tencent_secret_id.clone(),
-        cfg.tencent_secret_key.clone(),
+        creds.app_id.clone(),
+        creds.secret_id.clone(),
+        creds.secret_key.clone(),
     );
 
     let rt = tokio::runtime::Runtime::new()?;

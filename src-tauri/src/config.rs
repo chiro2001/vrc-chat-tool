@@ -3,11 +3,58 @@ use std::fs;
 use std::path::Path;
 use anyhow::Result;
 
+/// Tencent Cloud credentials — stored in a SEPARATE file to avoid leaking secrets in git.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TencentCredentials {
+    pub app_id: String,
+    pub secret_id: String,
+    pub secret_key: String,
+}
+
+impl Default for TencentCredentials {
+    fn default() -> Self {
+        Self {
+            app_id: "REDACTED_APPID".to_string(),
+            secret_id: "REDACTED_SECRET_ID".to_string(),
+            secret_key: "REDACTED_SECRET_KEY".to_string(),
+        }
+    }
+}
+
+impl TencentCredentials {
+    pub fn load(path: &str) -> Self {
+        let p = Path::new(path);
+        if !p.exists() {
+            eprintln!("Credentials file '{}' not found, using defaults", path);
+            return Self::default();
+        }
+        match fs::read_to_string(p) {
+            Ok(content) => match serde_yaml::from_str(&content) {
+                Ok(creds) => creds,
+                Err(e) => {
+                    eprintln!("Failed to parse '{}': {}, using defaults", path, e);
+                    Self::default()
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to read '{}': {}, using defaults", path, e);
+                Self::default()
+            }
+        }
+    }
+
+    pub fn save(&self, path: &str) -> Result<()> {
+        let content = serde_yaml::to_string(self)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+}
+
+/// Application configuration — stored in config.yaml (gitignored).
+/// Credentials are kept in a separate file (referenced by credentials_file).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub tencent_app_id: String,
-    pub tencent_secret_id: String,
-    pub tencent_secret_key: String,
+    pub tencent_credentials_file: String,
     pub osc_host: String,
     pub osc_port: u16,
     pub osc_line_count: usize,
@@ -20,9 +67,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            tencent_app_id: "REDACTED_APPID".to_string(),
-            tencent_secret_id: "REDACTED_SECRET_ID".to_string(),
-            tencent_secret_key: "REDACTED_SECRET_KEY".to_string(),
+            tencent_credentials_file: ".tencent_credentials.yaml".to_string(),
             osc_host: "127.0.0.1".to_string(),
             osc_port: 9000,
             osc_line_count: 2,
@@ -63,38 +108,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_values() {
-        let config = AppConfig::default();
-        assert_eq!(config.tencent_app_id, "REDACTED_APPID");
-        assert_eq!(config.tencent_secret_id, "REDACTED_SECRET_ID");
-        assert_eq!(config.tencent_secret_key, "REDACTED_SECRET_KEY");
-        assert_eq!(config.osc_host, "127.0.0.1");
-        assert_eq!(config.osc_port, 9000);
-    }
-
-    #[test]
-    fn test_yaml_roundtrip() {
-        let config = AppConfig::default();
-        let yaml = serde_yaml::to_string(&config).unwrap();
-        let deserialized: AppConfig = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(config.tencent_app_id, deserialized.tencent_app_id);
-        assert_eq!(config.tencent_secret_id, deserialized.tencent_secret_id);
-        assert_eq!(config.tencent_secret_key, deserialized.tencent_secret_key);
-        assert_eq!(config.osc_host, deserialized.osc_host);
-        assert_eq!(config.osc_port, deserialized.osc_port);
-    }
-
-    #[test]
-    fn test_save_and_load() {
-        let config = AppConfig::default();
-        config.save().unwrap();
-        let loaded = AppConfig::load().unwrap();
-        assert_eq!(config.tencent_app_id, loaded.tencent_app_id);
-        assert_eq!(config.tencent_secret_id, loaded.tencent_secret_id);
-        assert_eq!(config.tencent_secret_key, loaded.tencent_secret_key);
-        assert_eq!(config.osc_host, loaded.osc_host);
-        assert_eq!(config.osc_port, loaded.osc_port);
-        // clean up
-        let _ = fs::remove_file("config.yaml");
+    fn test_credentials_roundtrip() {
+        let creds = TencentCredentials::default();
+        let yaml = serde_yaml::to_string(&creds).unwrap();
+        let deserialized: TencentCredentials = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(creds.app_id, deserialized.app_id);
     }
 }

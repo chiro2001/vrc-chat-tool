@@ -6,9 +6,7 @@ import "./App.css";
 
 // Type definitions
 interface AppConfig {
-  tencent_app_id: string;
-  tencent_secret_id: string;
-  tencent_secret_key: string;
+  tencent_credentials_file: string;
   osc_host: string;
   osc_port: number;
   osc_line_count: number;
@@ -54,9 +52,7 @@ function App() {
 
   // Config
   const [config, setConfig] = useState<AppConfig>({
-    tencent_app_id: "",
-    tencent_secret_id: "",
-    tencent_secret_key: "",
+    tencent_credentials_file: ".tencent_credentials.yaml",
     osc_host: "127.0.0.1",
     osc_port: 9000,
     osc_line_count: 2,
@@ -400,21 +396,10 @@ function App() {
                   <input type="text" value={config.local_stt_url} onChange={(e) => updateConfig("local_stt_url", e.target.value)} />
                 </div>
               ) : (
-                <>
-                  <h3>{t("config.tencent")}</h3>
-              <div className="config-field">
-                <label>{t("config.appId")}</label>
-                <input type="text" value={config.tencent_app_id} onChange={(e) => updateConfig("tencent_app_id", e.target.value)} placeholder="REDACTED_APPID" />
-              </div>
-              <div className="config-field">
-                <label>{t("config.secretId")}</label>
-                <input type="text" value={config.tencent_secret_id} onChange={(e) => updateConfig("tencent_secret_id", e.target.value)} />
-              </div>
-              <div className="config-field">
-                <label>{t("config.secretKey")}</label>
-                <input type="password" value={config.tencent_secret_key} onChange={(e) => updateConfig("tencent_secret_key", e.target.value)} />
-              </div>
-                </>
+                <div className="config-field">
+                  <label>{t("config.credentialsFile")}</label>
+                  <input type="text" value={config.tencent_credentials_file} onChange={(e) => updateConfig("tencent_credentials_file", e.target.value)} />
+                </div>
               )}
               <h3>{t("config.osc")}</h3>
               <div className="config-field">

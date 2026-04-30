@@ -91,16 +91,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if run_asr {
         let config = AppConfig::load().unwrap_or_default();
+        let creds = vrc_chat_tool::config::TencentCredentials::load(&config.tencent_credentials_file);
 
-        if config.tencent_app_id.is_empty() {
+        if creds.app_id.is_empty() {
             eprintln!("ERROR: No Tencent credentials configured");
             std::process::exit(1);
         }
 
         let recognizer = StreamingRecognizer::new(
-            config.tencent_app_id.clone(),
-            config.tencent_secret_id.clone(),
-            config.tencent_secret_key.clone(),
+            creds.app_id.clone(),
+            creds.secret_id.clone(),
+            creds.secret_key.clone(),
         );
 
         let pcm_len = pcm_data.len();

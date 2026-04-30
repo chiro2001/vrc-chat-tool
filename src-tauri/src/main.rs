@@ -244,14 +244,16 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
         .clone()
         .ok_or_else(|| "Config not loaded".to_string())?;
 
-    // 2. Validate credentials (only for Tencent Cloud)
-    if cfg.asr_provider == "tencent"
-        && (cfg.tencent_app_id.is_empty()
-            || cfg.tencent_secret_id.is_empty()
-            || cfg.tencent_secret_key.is_empty())
-    {
-        return Err("Please configure Tencent Cloud credentials first".to_string());
-    }
+    // 2. Load credentials if using Tencent Cloud
+    let tencent_creds = if cfg.asr_provider == "tencent" {
+        let creds = config::TencentCredentials::load(&cfg.tencent_credentials_file);
+        if creds.app_id.is_empty() || creds.secret_id.is_empty() || creds.secret_key.is_empty() {
+            return Err("Please configure Tencent Cloud credentials first".to_string());
+        }
+        Some(creds)
+    } else {
+        None
+    };
 
     SHOULD_STOP.store(false, Ordering::SeqCst);
 
@@ -299,11 +301,12 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                     speech::local::LocalRecognizer::new(cfg.local_stt_url.clone())
                 )
             } else {
+                let c = tencent_creds.as_ref().unwrap();
                 speech::recognizer::Recognizer::Tencent(
                     speech::streaming::StreamingRecognizer::new(
-                        cfg.tencent_app_id.clone(),
-                        cfg.tencent_secret_id.clone(),
-                        cfg.tencent_secret_key.clone(),
+                        c.app_id.clone(),
+                        c.secret_id.clone(),
+                        c.secret_key.clone(),
                     )
                 )
             };
