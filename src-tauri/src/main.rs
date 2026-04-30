@@ -221,11 +221,11 @@ fn get_config() -> Option<config::AppConfig> {
 }
 
 #[tauri::command]
-fn save_config(cfg: config::AppConfig) -> Result<(), String> {
-    if let Err(e) = cfg.save() {
+fn save_config(config: config::AppConfig) -> Result<(), String> {
+    if let Err(e) = config.save() {
         return Err(format!("Failed to save config: {}", e));
     }
-    *CURRENT_CONFIG.lock().unwrap() = Some(cfg);
+    *CURRENT_CONFIG.lock().unwrap() = Some(config);
     Ok(())
 }
 
@@ -244,10 +244,11 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
         .clone()
         .ok_or_else(|| "Config not loaded".to_string())?;
 
-    // 2. Validate credentials
-    if cfg.tencent_app_id.is_empty()
-        || cfg.tencent_secret_id.is_empty()
-        || cfg.tencent_secret_key.is_empty()
+    // 2. Validate credentials (only for Tencent Cloud)
+    if cfg.asr_provider == "tencent"
+        && (cfg.tencent_app_id.is_empty()
+            || cfg.tencent_secret_id.is_empty()
+            || cfg.tencent_secret_key.is_empty())
     {
         return Err("Please configure Tencent Cloud credentials first".to_string());
     }
