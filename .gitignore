@@ -8,6 +8,7 @@ dist/
 *.log
 .env
 .env.local
+.tencent_credentials.yaml
 
 # Temp
 tmp/
