@@ -133,6 +133,9 @@ pub struct AppConfig {
     pub trigger_listener_enabled: bool,
     pub trigger_start: String,
     pub trigger_stop: String,
+    /// STT provider for the always-on trigger listener.
+    /// "local" = remote STT server (WebSocket), "local_embedded" = in-process Sherpa-ONNX.
+    pub trigger_stt_provider: String,
     pub global_hotkey_enabled: bool,
 }
 
@@ -152,6 +155,7 @@ impl Default for AppConfig {
             trigger_listener_enabled: false,
             trigger_start: "开始语音识别".to_string(),
             trigger_stop: "结束语音识别".to_string(),
+            trigger_stt_provider: "local".to_string(),
             global_hotkey_enabled: true,
         }
     }

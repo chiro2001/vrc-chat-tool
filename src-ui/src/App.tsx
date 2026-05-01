@@ -20,6 +20,7 @@ interface AppConfig {
   stt_config_path: string;
   global_hotkey_enabled: boolean;
   trigger_listener_enabled: boolean;
+  trigger_stt_provider: string;
 }
 
 interface AudioDevice {
@@ -83,6 +84,7 @@ function App() {
     stt_config_path: "stt-config.yaml",
     global_hotkey_enabled: true,
     trigger_listener_enabled: false,
+    trigger_stt_provider: "local",
   });
 
   // Credential form state
@@ -91,6 +93,14 @@ function App() {
   const [credSecretId, setCredSecretId] = useState("");
   const [credSecretKey, setCredSecretKey] = useState("");
   const [credSaveMsg, setCredSaveMsg] = useState("");
+
+  // STT model status
+  interface SttModelStatus { exists: boolean; model_name: string; missing_files: string[]; model_dir: string; }
+  interface DownloadProgress { phase: string; current: number; total: number; }
+  const [modelStatus, setModelStatus] = useState<SttModelStatus | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({ phase: "", current: 0, total: 0 });
+  const [downloadError, setDownloadError] = useState("");
 
   // Load config on mount
   useEffect(() => {
@@ -118,7 +128,18 @@ function App() {
     loadHistory();
   }, []);
 
-  // Set up event listeners
+  // Check STT model status when local_embedded is selected
+  useEffect(() => {
+    if (config.asr_provider === "local_embedded" || config.trigger_stt_provider === "local_embedded") {
+      invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path })
+        .then(setModelStatus)
+        .catch(() => setModelStatus(null));
+    } else {
+      setModelStatus(null);
+    }
+  }, [config.asr_provider, config.trigger_stt_provider, config.stt_config_path]);
+
+  // Set up event listeners (recording + download)
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
 
@@ -210,6 +231,34 @@ function App() {
       setCredSecretKey("");
     }
   }, [showConfigModal]);
+
+  // Listen for STT model download progress events
+  useEffect(() => {
+    const unlisteners: UnlistenFn[] = [];
+
+    listen<DownloadProgress>("stt-model-download-progress", (event) => {
+      setDownloadProgress(event.payload);
+      setIsDownloading(true);
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("stt-model-download-complete", () => {
+      setIsDownloading(false);
+      setDownloadError("");
+      setDownloadProgress({ phase: "complete", current: 0, total: 0 });
+      // Re-check model status after download
+      invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path })
+        .then(setModelStatus)
+        .catch(() => setModelStatus(null));
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("stt-model-download-error", (event) => {
+      setIsDownloading(false);
+      setDownloadError(event.payload);
+      setDownloadProgress({ phase: "error", current: 0, total: 0 });
+    }).then((fn) => unlisteners.push(fn));
+
+    return () => { unlisteners.forEach((fn) => fn()); };
+  }, [config.stt_config_path]);
 
   // Toggle recording
   const toggleRecording = useCallback(() => {
@@ -545,10 +594,59 @@ function App() {
                   <input type="text" value={config.local_stt_url} onChange={(e) => updateConfig("local_stt_url", e.target.value)} />
                 </div>
               ) : config.asr_provider === "local_embedded" ? (
-                <div className="config-field">
-                  <label>{t("config.sttConfigPath")}</label>
-                  <input type="text" value={config.stt_config_path} onChange={(e) => updateConfig("stt_config_path", e.target.value)} />
-                </div>
+                <>
+                  <div className="config-field">
+                    <label>{t("config.sttConfigPath")}</label>
+                    <input type="text" value={config.stt_config_path} onChange={(e) => updateConfig("stt_config_path", e.target.value)} />
+                  </div>
+                  {/* Model status & download */}
+                  <div className="config-field model-status-section">
+                    {modelStatus ? (
+                      modelStatus.exists ? (
+                        <span className="model-status ok">{t("model.exists", modelStatus.model_name)}</span>
+                      ) : (
+                        <div className="model-missing">
+                          <span className="model-status error">{t("model.missing", modelStatus.missing_files.join(", "))}</span>
+                          {downloadError && (
+                            <span className="model-status error" style={{ whiteSpace: "pre-wrap" }}>{t("model.downloadError")}: {downloadError}</span>
+                          )}
+                          <button
+                            className="download-button"
+                            disabled={isDownloading}
+                            onClick={() => {
+                              setDownloadError("");
+                              setIsDownloading(true);
+                              setDownloadProgress({ phase: "connecting", current: 0, total: 0 });
+                              invoke("download_stt_model", { sttConfigPath: config.stt_config_path, force: false })
+                                .catch((e) => { setDownloadError(String(e)); setIsDownloading(false); });
+                            }}
+                          >
+                            {isDownloading ? t("model.downloading") : t("model.download")}
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <span className="model-status checking">{t("model.statusChecking")}</span>
+                    )}
+                    {isDownloading && (
+                      <div className="download-progress">
+                        <div className="progress-bar">
+                          <div
+                            className="progress-fill"
+                            style={{
+                              width: downloadProgress.total > 0
+                                ? `${((downloadProgress.current / downloadProgress.total) * 100).toFixed(1)}%`
+                                : "0%"
+                            }}
+                          />
+                        </div>
+                        <span className="progress-text">
+                          {downloadProgress.phase}{downloadProgress.total > 0 ? `: ${(downloadProgress.current / 1048576).toFixed(1)}MB / ${(downloadProgress.total / 1048576).toFixed(1)}MB` : ""}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </>
               ) : (
                 <div className="config-field">
                   <label>{t("config.credentialsFile")}</label>
@@ -632,6 +730,15 @@ function App() {
                   {t("config.triggerListenerEnabled")}
                 </label>
               </div>
+              {config.trigger_listener_enabled && (
+                <div className="config-field">
+                  <label>{t("config.triggerSttProvider")}</label>
+                  <select value={config.trigger_stt_provider} onChange={(e) => updateConfig("trigger_stt_provider", e.target.value)}>
+                    <option value="local">{t("config.triggerSttProviderLocal")}</option>
+                    <option value="local_embedded">{t("config.triggerSttProviderLocalEmbedded")}</option>
+                  </select>
+                </div>
+              )}
 
               <div className="config-reset-section">
                 {showResetConfirm ? (

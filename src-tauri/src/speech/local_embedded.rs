@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use stt_server::{Config, SttEngine};
+use stt_server::{Config, OnlineStream, SttEngine};
 
 pub struct LocalEmbeddedRecognizer {
     engine: Arc<SttEngine>,
@@ -26,8 +26,52 @@ impl LocalEmbeddedRecognizer {
         Self::new(config)
     }
 
+    // --- Low-level streaming API (for trigger listener and continuous use) ---
+
+    /// Create an independent recognition stream.
+    ///
+    /// Each stream tracks its own audio session. Call `reset()` after each
+    /// endpoint to start a new utterance.
+    pub fn create_stream(&self) -> OnlineStream {
+        self.engine.create_stream()
+    }
+
+    /// Feed float32 PCM samples into the stream. Sample rate must match the
+    /// engine's configured rate (16000).
+    pub fn decode(&self, stream: &OnlineStream, samples: &[f32]) {
+        self.engine.decode(stream, samples)
+    }
+
+    /// Check if an endpoint (sentence boundary) has been detected.
+    pub fn is_endpoint(&self, stream: &OnlineStream) -> bool {
+        self.engine.is_endpoint(stream)
+    }
+
+    /// Get the current recognition text from the stream.
+    /// Returns `None` if no result is available yet.
+    pub fn get_text(&self, stream: &OnlineStream) -> Option<String> {
+        self.engine.get_text(stream)
+    }
+
+    /// Reset the stream after an endpoint — starts a new utterance segment.
+    pub fn reset(&self, stream: &OnlineStream) {
+        self.engine.reset(stream)
+    }
+
+    /// Signal that no more input will be provided.
+    pub fn input_finished(&self, stream: &OnlineStream) {
+        self.engine.input_finished(stream)
+    }
+
+    /// Get the engine's sample rate.
+    pub fn sample_rate(&self) -> i32 {
+        self.engine.sample_rate()
+    }
+
+    // --- High-level streaming API (for recording pipeline) ---
+
     /// Convert i16 PCM bytes to f32 samples (normalized to [-1, 1]).
-    fn i16_to_f32(pcm: &[u8]) -> Vec<f32> {
+    pub fn i16_to_f32(pcm: &[u8]) -> Vec<f32> {
         pcm.chunks_exact(2)
             .map(|pair| {
                 let sample = i16::from_le_bytes([pair[0], pair[1]]);

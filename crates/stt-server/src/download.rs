@@ -4,7 +4,7 @@
 
 use anyhow::{Context as _, Result};
 use bzip2::read::BzDecoder;
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::path::Path;
 use std::time::Duration;
 use tar::Archive;
@@ -16,7 +16,8 @@ const RELEASES_BASE: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/down
 const USER_AGENT: &str = "stt-server/0.1";
 
 /// Required files for ASR model validation.
-const ASR_REQUIRED: &[&str] = &[
+/// These are DEFAULT names; the actual verification uses config-specified filenames.
+const ASR_REQUIRED_DEFAULT: &[&str] = &[
     "encoder.int8.onnx",
     "decoder.onnx",
     "joiner.int8.onnx",
@@ -24,7 +25,25 @@ const ASR_REQUIRED: &[&str] = &[
 ];
 
 /// Required files for punctuation model validation.
-const PUNCT_REQUIRED: &[&str] = &["model.int8.onnx"];
+const PUNCT_REQUIRED_DEFAULT: &[&str] = &["model.int8.onnx"];
+
+/// Build the required files list from config fields.
+fn asr_required_from_config(config: &Config) -> Vec<&str> {
+    vec![
+        config.asr.encoder.as_str(),
+        config.asr.decoder.as_str(),
+        config.asr.joiner.as_str(),
+        config.asr.tokens.as_str(),
+    ]
+}
+
+fn punct_required_from_config(config: &Config) -> Vec<&str> {
+    if config.punctuation.enabled && !config.punctuation.model_file.is_empty() {
+        vec![config.punctuation.model_file.as_str()]
+    } else {
+        vec!["model.int8.onnx"]
+    }
+}
 
 /// Download and extract ASR and punctuation models.
 ///
@@ -32,6 +51,8 @@ const PUNCT_REQUIRED: &[&str] = &["model.int8.onnx"];
 pub fn download_models(config: &Config, force: bool, no_punct: bool) -> Result<()> {
     let model_dir = &config.asr.model_dir;
     std::fs::create_dir_all(model_dir).context("Failed to create model directory")?;
+
+    let asr_files = asr_required_from_config(config);
 
     // --- ASR model ---
     let asr_url = format!(
@@ -42,7 +63,7 @@ pub fn download_models(config: &Config, force: bool, no_punct: bool) -> Result<(
         &asr_url,
         &config.asr.model_name,
         model_dir,
-        ASR_REQUIRED,
+        &asr_files,
         force,
     )?;
 
@@ -51,6 +72,7 @@ pub fn download_models(config: &Config, force: bool, no_punct: bool) -> Result<(
         && config.punctuation.enabled
         && !config.punctuation.model_name.is_empty()
     {
+        let punct_files = punct_required_from_config(config);
         let punct_url = format!(
             "{}/punctuation-models/{}.tar.bz2",
             RELEASES_BASE, config.punctuation.model_name,
@@ -59,16 +81,16 @@ pub fn download_models(config: &Config, force: bool, no_punct: bool) -> Result<(
             &punct_url,
             &config.punctuation.model_name,
             model_dir,
-            PUNCT_REQUIRED,
+            &punct_files,
             force,
         )?;
     } else if no_punct {
-        tracing::info!("Punctuation model download skipped (--no-punct)");
+        eprintln!("[download] Punctuation model download skipped (--no-punct)");
     } else {
         tracing::info!("Punctuation model download skipped (disabled in config)");
     }
 
-    tracing::info!("All models downloaded and verified successfully.");
+    eprintln!("[download] All models downloaded and verified successfully.");
     Ok(())
 }
 
@@ -231,6 +253,227 @@ fn verify_model_files(model_dir: &Path, required: &[&str]) -> Vec<String> {
     missing
 }
 
+// ---------------------------------------------------------------------------
+// Progress-aware download API — for use by Tauri frontend integration
+// ---------------------------------------------------------------------------
+
+/// Download models with progress reporting via a callback.
+///
+/// The callback receives `(phase: &str, current: u64, total: u64)`:
+/// - `phase`: "connecting", "download_asr", "extract_asr", "verify_asr",
+///            "download_punct", "extract_punct", "verify_punct", "complete"
+/// - `current` / `total`: bytes for download phases, 0-based for extract/verify
+pub fn download_models_with_progress<F>(
+    config: &Config,
+    force: bool,
+    no_punct: bool,
+    on_progress: &F,
+) -> Result<()>
+where
+    F: Fn(&str, u64, u64),
+{
+    let model_dir = &config.asr.model_dir;
+    std::fs::create_dir_all(model_dir).context("Failed to create model directory")?;
+
+    on_progress("connecting", 0, 0);
+
+    let asr_files = asr_required_from_config(config);
+
+    // --- ASR model ---
+    let asr_url = format!(
+        "{}/asr-models/{}.tar.bz2",
+        RELEASES_BASE, config.asr.model_name,
+    );
+    eprintln!("[download] ASR URL: {}", asr_url);
+    download_single_model_with_progress(
+        &asr_url,
+        &config.asr.model_name,
+        model_dir,
+        &asr_files,
+        force,
+        on_progress,
+        "asr",
+    )?;
+
+    // --- Punctuation model ---
+    if !no_punct
+        && config.punctuation.enabled
+        && !config.punctuation.model_name.is_empty()
+    {
+        let punct_files = punct_required_from_config(config);
+        let punct_url = format!(
+            "{}/punctuation-models/{}.tar.bz2",
+            RELEASES_BASE, config.punctuation.model_name,
+        );
+        download_single_model_with_progress(
+            &punct_url,
+            &config.punctuation.model_name,
+            model_dir,
+            &punct_files,
+            force,
+            on_progress,
+            "punct",
+        )?;
+    }
+
+    eprintln!("[download] Download complete, all models verified.");
+    on_progress("complete", 0, 0);
+    Ok(())
+}
+
+/// Progress-aware single model download.
+fn download_single_model_with_progress<F>(
+    url: &str,
+    model_name: &str,
+    model_dir: &Path,
+    required_files: &[&str],
+    force: bool,
+    on_progress: &F,
+    label: &str,
+) -> Result<()>
+where
+    F: Fn(&str, u64, u64),
+{
+    let target_dir = model_dir.join(model_name);
+
+    // Skip if already present and valid
+    if !force && target_dir.is_dir() {
+        let missing = verify_model_files(&target_dir, required_files);
+        if missing.is_empty() {
+            on_progress(&format!("download_{}", label), 100, 100);
+            on_progress(&format!("extract_{}", label), 1, 1);
+            on_progress(&format!("verify_{}", label), 1, 1);
+            return Ok(());
+        }
+    }
+
+    // Remove existing if force
+    if force && target_dir.is_dir() {
+        std::fs::remove_dir_all(&target_dir)
+            .with_context(|| format!("Failed to remove {}", target_dir.display()))?;
+    }
+
+    on_progress(&format!("download_{}", label), 0, 0);
+
+    let archive_bytes = download_with_retry_progress(url, 3, |current, total| {
+        on_progress(&format!("download_{}", label), current, total);
+    })?;
+
+    on_progress(&format!("extract_{}", label), 0, 1);
+    extract_tar_bz2(&archive_bytes, model_dir, model_name)?;
+    on_progress(&format!("extract_{}", label), 1, 1);
+
+    on_progress(&format!("verify_{}", label), 0, 1);
+    let missing = verify_model_files(&target_dir, required_files);
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Verification failed for {} — missing files: {:?}",
+            model_name,
+            missing,
+        );
+    }
+    on_progress(&format!("verify_{}", label), 1, 1);
+
+    Ok(())
+}
+
+/// Download a URL with retry, calling a progress closure on each chunk.
+fn download_with_retry_progress<F>(
+    url: &str,
+    max_retries: u32,
+    on_progress: F,
+) -> Result<Vec<u8>>
+where
+    F: Fn(u64, u64),
+{
+    eprintln!("[download] Starting download: {}", url);
+
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(600))
+        .build()?;
+
+    let mut last_error = None;
+    for attempt in 1..=max_retries {
+        eprintln!("[download] Attempt {}/{}", attempt, max_retries);
+        match client.get(url).send() {
+            Ok(mut response) => {
+                let status = response.status();
+                eprintln!("[download] HTTP {}", status.as_u16());
+                if !status.is_success() {
+                    let err = anyhow::anyhow!(
+                        "HTTP {} from {}",
+                        status.as_u16(),
+                        url,
+                    );
+                    eprintln!("[download] Error: {}", err);
+                    return Err(err);
+                }
+
+                let total = response.content_length().unwrap_or(0);
+                eprintln!("[download] Content-Length: {} bytes ({:.1} MB)", total, total as f64 / 1048576.0);
+                let mut writer = ProgressWriter {
+                    inner: if total > 0 {
+                        Vec::with_capacity(total as usize)
+                    } else {
+                        Vec::new()
+                    },
+                    downloaded: 0,
+                    total,
+                    on_progress: &on_progress,
+                };
+
+                response
+                    .copy_to(&mut writer)
+                    .context("Failed to read response body")?;
+
+                return Ok(writer.inner);
+            }
+            Err(e) => {
+                last_error = Some(e);
+                if attempt < max_retries {
+                    let wait = Duration::from_secs(2u64.pow(attempt));
+                    tracing::warn!(
+                        "Download attempt {}/{} failed: {}. Retrying in {}s...",
+                        attempt,
+                        max_retries,
+                        last_error.as_ref().unwrap(),
+                        wait.as_secs(),
+                    );
+                    std::thread::sleep(wait);
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "All {} download attempts failed. Last error: {}",
+        max_retries,
+        last_error.unwrap(),
+    ))
+}
+
+/// Writer adapter that reports download progress.
+struct ProgressWriter<'a, F: Fn(u64, u64)> {
+    inner: Vec<u8>,
+    downloaded: u64,
+    total: u64,
+    on_progress: &'a F,
+}
+
+impl<F: Fn(u64, u64)> Write for ProgressWriter<'_, F> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(buf)?;
+        self.downloaded += buf.len() as u64;
+        (self.on_progress)(self.downloaded, self.total);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Check basic network connectivity by HEAD-requesting github.com.
 pub fn check_network_connectivity() -> bool {
     let client = match reqwest::blocking::Client::builder()
@@ -261,13 +504,13 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
 
         // No files → all missing
-        let missing = verify_model_files(&tmp, ASR_REQUIRED);
-        assert_eq!(missing.len(), ASR_REQUIRED.len());
+        let missing = verify_model_files(&tmp, ASR_REQUIRED_DEFAULT);
+        assert_eq!(missing.len(), ASR_REQUIRED_DEFAULT.len());
 
         // Create one file → fewer missing
         std::fs::write(tmp.join("encoder.int8.onnx"), b"fake").unwrap();
-        let missing = verify_model_files(&tmp, ASR_REQUIRED);
-        assert_eq!(missing.len(), ASR_REQUIRED.len() - 1);
+        let missing = verify_model_files(&tmp, ASR_REQUIRED_DEFAULT);
+        assert_eq!(missing.len(), ASR_REQUIRED_DEFAULT.len() - 1);
         assert!(!missing.contains(&"encoder.int8.onnx".to_string()));
 
         let _ = std::fs::remove_dir_all(&tmp);

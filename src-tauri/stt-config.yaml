@@ -5,7 +5,7 @@
 # 仅当 asr_provider = "local_embedded" 时需要此文件
 #
 # MODEL SETUP / 模型安装:
-#   python scripts/download_model.py
+#   Use the Settings UI → select "本地嵌入式推理" → click "下载模型"
 #   Or manually download from: https://github.com/k2-fsa/sherpa-onnx/releases
 #   或手动下载: https://github.com/k2-fsa/sherpa-onnx/releases
 #
@@ -19,7 +19,7 @@ server:
 
 asr:
   model_dir: "./models"              # Directory containing the model
-  model_name: "sherpa-onnx-zipformer-zh-14M-2024-12-05"  # Model folder name
+  model_name: "sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23"  # Model folder name
   encoder: "encoder-epoch-99-avg-1.onnx"
   decoder: "decoder-epoch-99-avg-1.onnx"
   joiner: "joiner-epoch-99-avg-1.onnx"

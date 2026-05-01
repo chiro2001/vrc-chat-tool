@@ -90,6 +90,23 @@ struct RecordingInfo {
     created: String,
 }
 
+// --- STT Model Status & Download ---
+
+#[derive(Clone, serde::Serialize)]
+struct SttModelStatus {
+    exists: bool,
+    model_name: String,
+    missing_files: Vec<String>,
+    model_dir: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DownloadProgress {
+    phase: String,
+    current: u64,
+    total: u64,
+}
+
 #[tauri::command]
 fn list_test_recordings() -> Result<Vec<RecordingInfo>, String> {
     let dir = recordings_dir();
@@ -244,7 +261,8 @@ fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(), S
 
     // Start or stop trigger listener based on config change
     if config.trigger_listener_enabled && !trigger_was_enabled {
-        if !config.local_stt_url.is_empty() {
+        let can_start = config.trigger_stt_provider == "local_embedded" || !config.local_stt_url.is_empty();
+        if can_start {
             log::info("main", "Trigger listener enabled, starting...");
             trigger::start_trigger_listener(Arc::new(config.clone()));
         }
@@ -371,12 +389,10 @@ fn start_recording_inner(
                 } else if cfg.asr_provider == "local_embedded" {
                     let engine_cfg = speech::local_embedded::LocalEmbeddedRecognizer::from_config_file(&cfg.stt_config_path)
                         .map_err(|e| anyhow::anyhow!(
-                            "无法加载 STT 模型配置: {}\n\n请检查:\n\
-                             1. 文件 {} 是否存在\n\
-                             2. 模型文件是否已下载 (python scripts/download_model.py)\n\
-                             3. 设置中\"STT 模型配置路径\"是否正确",
+                            "无法加载 STT 模型: {}\n\n请检查:\n\
+                             1. 设置中\"STT 模型配置路径\"是否正确\n\
+                             2. 模型文件是否存在（可在设置中下载模型）",
                             e,
-                            cfg.stt_config_path,
                         ))?;
                     speech::recognizer::Recognizer::LocalEmbedded(engine_cfg)
             } else {
@@ -534,6 +550,75 @@ fn save_device_index(device_idx: u32) {
     history::set_audio_device_index(device_idx as usize);
 }
 
+// --- STT Model Commands ---
+
+/// Check whether STT model files exist on disk.
+#[tauri::command]
+fn check_stt_model(stt_config_path: String) -> Result<SttModelStatus, String> {
+    let config = stt_server::Config::from_file(&stt_config_path)
+        .map_err(|e| format!("Failed to load STT config: {}", e))?;
+
+    let target_dir = config.asr_model_path();
+    let required = [
+        config.asr.encoder.as_str(),
+        config.asr.decoder.as_str(),
+        config.asr.joiner.as_str(),
+        config.asr.tokens.as_str(),
+    ];
+
+    let missing: Vec<String> = required
+        .iter()
+        .filter(|f| !target_dir.join(f).exists())
+        .map(|f| f.to_string())
+        .collect();
+
+    Ok(SttModelStatus {
+        exists: missing.is_empty(),
+        model_name: config.asr.model_name.clone(),
+        missing_files: missing,
+        model_dir: target_dir.to_string_lossy().to_string(),
+    })
+}
+
+/// Download STT models in a background thread with progress events.
+///
+/// Emits:
+/// - `stt-model-download-progress` → `{ phase, current, total }`
+/// - `stt-model-download-complete` → `""`
+/// - `stt-model-download-error` → error message string
+#[tauri::command]
+fn download_stt_model(app: tauri::AppHandle, stt_config_path: String, force: bool) -> Result<(), String> {
+    let config = stt_server::Config::from_file(&stt_config_path)
+        .map_err(|e| format!("Failed to load STT config: {}", e))?;
+
+    std::thread::spawn(move || {
+        let app = app.clone();
+        let result = stt_server::download_models_with_progress(
+            &config,
+            force,
+            true, // no_punct — punctuation disabled for integrated mode
+            &|phase, current, total| {
+                let _ = app.emit_all("stt-model-download-progress", DownloadProgress {
+                    phase: phase.to_string(),
+                    current,
+                    total,
+                });
+            },
+        );
+
+        match result {
+            Ok(()) => {
+                let _ = app.emit_all("stt-model-download-complete", "");
+            }
+            Err(e) => {
+                let _ = app.emit_all("stt-model-download-error", format!("{}", e));
+            }
+        }
+    });
+
+    Ok(())
+}
+
 // --- Main Entry ---
 fn main() {
     // Initialize file logger
@@ -554,14 +639,19 @@ fn main() {
         log::debug("main", "Hotkey enabled, deferring to Tauri setup");
     }
 
-    // Start always-on trigger listener if enabled AND local_stt_url configured
-    if config.trigger_listener_enabled && !config.local_stt_url.is_empty() {
-        log::info("main", &format!("Starting trigger listener, STT URL: {}", config.local_stt_url));
+    // Start always-on trigger listener if enabled AND provider configured
+    if config.trigger_listener_enabled
+        && (config.trigger_stt_provider == "local_embedded" || !config.local_stt_url.is_empty())
+    {
+        log::info("main", &format!(
+            "Starting trigger listener (provider: {}, url: {})",
+            config.trigger_stt_provider, config.local_stt_url
+        ));
         trigger::start_trigger_listener(Arc::new(config.clone()));
     } else if !config.trigger_listener_enabled {
         log::info("main", "Trigger listener disabled in config");
     } else {
-        log::info("main", "No local STT URL configured, trigger listener disabled");
+        log::info("main", "No STT provider configured, trigger listener disabled");
     }
 
     tauri::Builder::default()
@@ -623,7 +713,9 @@ fn main() {
                     if !trigger::is_active() && trigger::can_restart() {
                         let cfg = CURRENT_CONFIG.lock().unwrap().clone();
                         if let Some(ref c) = cfg {
-                            if c.trigger_listener_enabled && !c.local_stt_url.is_empty() {
+                            if c.trigger_listener_enabled
+                                && (c.trigger_stt_provider == "local_embedded" || !c.local_stt_url.is_empty())
+                            {
                                 log::warn("trigger", "Listener died, attempting restart");
                                 trigger::start_trigger_listener(Arc::new(c.clone()));
                             }
@@ -684,6 +776,8 @@ fn main() {
             clear_recognition_history,
             get_saved_device_index,
             save_device_index,
+            check_stt_model,
+            download_stt_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

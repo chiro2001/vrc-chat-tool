@@ -1,12 +1,15 @@
 /// Always-on local STT trigger listener.
 /// Runs in a background thread, captures audio, sends to local STT server,
 /// and detects trigger phrases to start/stop recording.
+// --- Imports ---
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}, Mutex};
 use std::thread;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 use crate::config::AppConfig;
 use crate::audio::capture::AudioCapture;
+use crate::speech::local_embedded::LocalEmbeddedRecognizer;
+use stt_server::Config as SttConfig;
 
 static TRIGGER_DETECTED: AtomicBool = AtomicBool::new(false);
 static LAST_TRIGGER_TEXT: Mutex<String> = Mutex::new(String::new());
@@ -145,8 +148,10 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
     let start_phrase = config.trigger_start.clone();
     let stop_phrase = config.trigger_stop.clone();
     let local_url = config.local_stt_url.clone();
+    let stt_config_path = config.stt_config_path.clone();
+    let trigger_provider = config.trigger_stt_provider.clone();
 
-    if local_url.is_empty() {
+    if trigger_provider != "local_embedded" && local_url.is_empty() {
         crate::log::info("trigger", "No local STT URL configured, trigger listener disabled");
         TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
         return;
@@ -211,20 +216,102 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
             crate::log::debug("trigger", "Audio capture thread exited");
         });
 
-        // Run the STT WebSocket client
-        let rt = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(e) => {
-                crate::log::error("trigger", &format!("Failed to create tokio runtime: {}", e));
-                stop_signal.store(true, Ordering::SeqCst);
-                TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
-                return;
-            }
-        };
+        // --- Choose STT backend ---
+        if trigger_provider == "local_embedded" {
+            // --- Local embedded STT path ---
+            crate::log::info("trigger", &format!(
+                "Initializing local embedded STT from: {}",
+                stt_config_path
+            ));
 
-        rt.block_on(async {
-            let url = local_url.clone();
-            crate::log::info("trigger", &format!("Connecting to local STT: {}", url));
+            let stt_cfg = match SttConfig::from_file(&stt_config_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    crate::log::error("trigger", &format!("Failed to load STT config: {}", e));
+                    *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
+                    stop_signal.store(true, Ordering::SeqCst);
+                    TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
+
+            let recognizer = match LocalEmbeddedRecognizer::new(stt_cfg) {
+                Ok(r) => {
+                    *TRIGGER_STT_STATUS.lock().unwrap() = "connected".to_string();
+                    crate::log::info("trigger", "Local embedded STT engine ready");
+                    r
+                }
+                Err(e) => {
+                    crate::log::error("trigger", &format!("Failed to init local STT: {}", e));
+                    *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
+                    stop_signal.store(true, Ordering::SeqCst);
+                    TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
+
+            let stream = recognizer.create_stream();
+
+            // Main processing loop: receive PCM, feed to engine, check endpoints
+            loop {
+                match pcm_rx.blocking_recv() {
+                    Some(chunk) => {
+                        let samples = LocalEmbeddedRecognizer::i16_to_f32(&chunk);
+                        if !samples.is_empty() {
+                            recognizer.decode(&stream, &samples);
+
+                            if recognizer.is_endpoint(&stream) {
+                                if let Some(text) = recognizer.get_text(&stream) {
+                                    let trimmed = text.trim();
+                                    if !trimmed.is_empty() {
+                                        crate::log::debug("trigger", &format!("STT heard: '{}'", trimmed));
+
+                                        // Store for UI echo (ring buffer)
+                                        {
+                                            let mut buf = HEARD_TEXTS.lock().unwrap();
+                                            buf.push(trimmed.to_string());
+                                            if buf.len() > MAX_HEARD_TEXTS {
+                                                buf.remove(0);
+                                            }
+                                        }
+
+                                        // Check trigger phrases
+                                        if matches_trigger(trimmed, &start_phrase) {
+                                            crate::log::info("trigger", &format!("START detected: '{}'", trimmed));
+                                            TRIGGER_DETECTED.store(true, Ordering::SeqCst);
+                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "start".to_string();
+                                        } else if matches_trigger(trimmed, &stop_phrase) {
+                                            crate::log::info("trigger", &format!("STOP detected: '{}'", trimmed));
+                                            TRIGGER_DETECTED.store(true, Ordering::SeqCst);
+                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
+                                        }
+                                    }
+                                }
+                                recognizer.reset(&stream);
+                            }
+                        }
+                    }
+                    None => {
+                        crate::log::debug("trigger", "PCM channel closed, exiting local STT loop");
+                        break;
+                    }
+                }
+            }
+        } else {
+            // --- Remote STT (WebSocket) path ---
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    crate::log::error("trigger", &format!("Failed to create tokio runtime: {}", e));
+                    stop_signal.store(true, Ordering::SeqCst);
+                    TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
+
+            rt.block_on(async {
+                let url = local_url.clone();
+                crate::log::info("trigger", &format!("Connecting to local STT: {}", url));
 
             let ws = match tokio_tungstenite::connect_async(&url).await {
                 Ok((ws, _)) => {
@@ -321,6 +408,8 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                 }
             }
         });
+
+        } // else (remote STT path)
 
         // Cleanup: signal capture to stop if still running, clear state
         stop_signal.store(true, Ordering::SeqCst);
