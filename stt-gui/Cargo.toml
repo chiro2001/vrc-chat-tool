@@ -1,0 +1,36 @@
+[package]
+name = "stt-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stt-gui"
+path = "src/main.rs"
+
+[dependencies]
+# GUI framework
+eframe = "0.31"
+egui = "0.31"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.21" }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Audio
+cpal = "0.15"
+hound = "3.5"
+
+# File dialog
+rfd = "0.15"
+
+# Timestamps
+chrono = "0.4"
+
+# Error handling
+anyhow = "1"
