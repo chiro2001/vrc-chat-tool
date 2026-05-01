@@ -285,26 +285,15 @@ fn start_recording_inner(
         None
     };
 
-    // Stop trigger listener's audio capture to free the audio device
-    // (trigger listener's cpal stream competes with recording's cpal stream)
-    let trigger_was_active = trigger::is_active();
-    if trigger_was_active {
-        log::debug("recorder", "Stopping trigger capture before recording");
-        trigger::stop_capture();
-        thread::sleep(std::time::Duration::from_millis(200));
-    }
-
     SHOULD_STOP.store(false, Ordering::SeqCst);
 
-    // Pause trigger listener's audio sending — main pipeline handles STT during recording
+    // Pause trigger listener's STT audio sending during recording
+    // (trigger capture keeps running for volume display; WebSocket stays connected)
     trigger::pause_audio();
 
     let cfg = cfg.clone();
     let trigger_stop_partial = cfg.trigger_stop.clone();
     let trigger_stop_sentence = cfg.trigger_stop.clone();
-    let local_stt_url = cfg.local_stt_url.clone();
-    let trigger_start = cfg.trigger_start.clone();
-    let trigger_stop_phrase = cfg.trigger_stop.clone();
     thread::spawn(move || {
         log::info("recorder", "Recording started");
         let result: Result<String, anyhow::Error> = (|| -> anyhow::Result<String> {
@@ -448,17 +437,6 @@ fn start_recording_inner(
 
         // Always resume trigger listener audio after recording stops
         trigger::resume_audio();
-
-        // Restart trigger listener if it was stopped for this recording
-        if trigger_was_active {
-            log::debug("recorder", "Restarting trigger listener");
-            trigger::start_trigger_listener(Arc::new(config::AppConfig {
-                trigger_start,
-                trigger_stop: trigger_stop_phrase,
-                local_stt_url,
-                ..config::AppConfig::load().unwrap_or_default()
-            }));
-        }
 
         IS_RECORDING.store(false, Ordering::SeqCst);
 
