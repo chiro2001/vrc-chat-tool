@@ -4,6 +4,7 @@ use vrc_chat_tool::config;
 use vrc_chat_tool::audio;
 use vrc_chat_tool::speech;
 use vrc_chat_tool::osc;
+use vrc_chat_tool::trigger;
 
 mod e2e_server;
 mod history;
@@ -438,7 +439,12 @@ fn main() {
 
     // Load config on startup
     let config = config::AppConfig::load().unwrap_or_default();
-    *CURRENT_CONFIG.lock().unwrap() = Some(config);
+    *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
+
+    // Start always-on trigger listener (local STT for voice commands)
+    if config.asr_provider == "local" && !config.local_stt_url.is_empty() {
+        trigger::start_trigger_listener(Arc::new(config.clone()));
+    }
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
