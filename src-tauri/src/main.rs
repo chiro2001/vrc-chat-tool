@@ -6,6 +6,7 @@ use vrc_chat_tool::speech;
 use vrc_chat_tool::osc;
 use vrc_chat_tool::trigger;
 use vrc_chat_tool::hotkey;
+use vrc_chat_tool::log;
 
 mod e2e_server;
 mod history;
@@ -20,6 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // --- Global State ---
 static CURRENT_CONFIG: Mutex<Option<config::AppConfig>> = Mutex::new(None);
 static SHOULD_STOP: AtomicBool = AtomicBool::new(false);
+static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
 // --- Log System ---
 static LOG_BUFFER: Mutex<Vec<LogEntry>> = Mutex::new(Vec::new());
@@ -266,16 +268,31 @@ fn start_recording_inner(
     device_index: Option<usize>,
     cfg: &config::AppConfig,
 ) -> Result<(), String> {
+    // Prevent concurrent recordings (double-start from trigger + manual click)
+    if IS_RECORDING.swap(true, Ordering::SeqCst) {
+        return Err("Recording already in progress".to_string());
+    }
+
     // Load credentials if using Tencent Cloud
     let tencent_creds = if cfg.asr_provider == "tencent" {
         let creds = config::TencentCredentials::load(&cfg.tencent_credentials_file);
         if creds.app_id.is_empty() || creds.secret_id.is_empty() || creds.secret_key.is_empty() {
+            IS_RECORDING.store(false, Ordering::SeqCst);
             return Err("Please configure Tencent Cloud credentials first".to_string());
         }
         Some(creds)
     } else {
         None
     };
+
+    // Stop trigger listener's audio capture to free the audio device
+    // (trigger listener's cpal stream competes with recording's cpal stream)
+    let trigger_was_active = trigger::is_active();
+    if trigger_was_active {
+        log::debug("recorder", "Stopping trigger capture before recording");
+        trigger::stop_capture();
+        thread::sleep(std::time::Duration::from_millis(200));
+    }
 
     SHOULD_STOP.store(false, Ordering::SeqCst);
 
@@ -285,8 +302,11 @@ fn start_recording_inner(
     let cfg = cfg.clone();
     let trigger_stop_partial = cfg.trigger_stop.clone();
     let trigger_stop_sentence = cfg.trigger_stop.clone();
+    let local_stt_url = cfg.local_stt_url.clone();
+    let trigger_start = cfg.trigger_start.clone();
+    let trigger_stop_phrase = cfg.trigger_stop.clone();
     thread::spawn(move || {
-        emit_log(&app, "info", "recorder", "Recording started");
+        log::info("recorder", "Recording started");
         let result: Result<String, anyhow::Error> = (|| -> anyhow::Result<String> {
             // Create audio capture
             let capture = match device_index {
@@ -364,11 +384,11 @@ fn start_recording_inner(
                     stop_signal_for_capture,
                 );
                 if let Err(e) = result {
-                    eprintln!("Audio capture error: {}", e);
+                    log::error("audio", &format!("Capture error: {}", e));
                 }
             });
 
-            emit_log(&app, "debug", "audio", "Audio capture stream opened");
+            log::debug("audio", "Audio capture stream opened");
 
             // Run streaming ASR via unified recognizer
             let osc_enabled = cfg.osc_enabled;
@@ -394,7 +414,7 @@ fn start_recording_inner(
                         }
                         // Check stop trigger phrase in ASR output
                         if trigger::matches_trigger(partial_text, &trigger_stop_partial) {
-                            eprintln!("[Trigger] STOP detected in partial: '{}'", partial_text);
+                            log::info("recorder", &format!("STOP detected in partial: '{}'", partial_text));
                             SHOULD_STOP.store(true, Ordering::SeqCst);
                         }
                     },
@@ -406,7 +426,7 @@ fn start_recording_inner(
                         history::add_entry(sentence_text, "asr");
                         // Check stop trigger phrase in sentence output
                         if trigger::matches_trigger(sentence_text, &trigger_stop_sentence) {
-                            eprintln!("[Trigger] STOP detected in sentence: '{}'", sentence_text);
+                            log::info("recorder", &format!("STOP detected in sentence: '{}'", sentence_text));
                             SHOULD_STOP.store(true, Ordering::SeqCst);
                         }
                     },
@@ -418,9 +438,9 @@ fn start_recording_inner(
 
             if osc_enabled {
                 let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
-                osc.send_typing(false)?;
+                let _ = osc.send_typing(false);
                 // Clear the chatbox display after stopping
-                osc.clear_chatbox()?;
+                let _ = osc.clear_chatbox();
             }
 
             Ok(recognized_text)
@@ -429,14 +449,28 @@ fn start_recording_inner(
         // Always resume trigger listener audio after recording stops
         trigger::resume_audio();
 
+        // Restart trigger listener if it was stopped for this recording
+        if trigger_was_active {
+            log::debug("recorder", "Restarting trigger listener");
+            trigger::start_trigger_listener(Arc::new(config::AppConfig {
+                trigger_start,
+                trigger_stop: trigger_stop_phrase,
+                local_stt_url,
+                ..config::AppConfig::load().unwrap_or_default()
+            }));
+        }
+
+        IS_RECORDING.store(false, Ordering::SeqCst);
+
         match result {
             Ok(text) => {
-                emit_log(&app, "info", "asr", &format!("Recognition result: {}", text));
+                log::info("asr", &format!("Recognition result: {}", text));
                 let _ = app.emit_all("recording-complete", text);
             }
             Err(e) => {
-                emit_log(&app, "error", "recorder", &format!("Error: {}", e));
-                let _ = app.emit_all("recording-error", format!("{}", e));
+                let msg = format!("{}", e);
+                log::error("recorder", &format!("Error: {}", msg));
+                let _ = app.emit_all("recording-error", msg);
             }
         }
     });
@@ -483,6 +517,9 @@ fn save_device_index(device_idx: u32) {
 
 // --- Main Entry ---
 fn main() {
+    // Initialize file logger
+    log::init("tmp/app.log");
+
     // Check for E2E test mode (BEFORE Tauri init)
     if std::env::args().any(|a| a == "--e2e") {
         e2e_server::run_e2e_server().expect("E2E server failed");
@@ -493,34 +530,40 @@ fn main() {
     let config = config::AppConfig::load().unwrap_or_default();
     *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
 
-    // Enable global hotkey (F13) at startup if configured
+    // Enable global hotkey (F10) at startup if configured
     if config.global_hotkey_enabled {
-        // We need an app handle for hotkey, but we don't have one yet.
-        // Defer to Tauri setup.
+        log::debug("main", "Hotkey enabled, deferring to Tauri setup");
     }
 
     // Start always-on trigger listener (local STT for voice commands)
     // Always start if local_stt_url is configured, regardless of asr_provider
     if !config.local_stt_url.is_empty() {
+        log::info("main", &format!("Starting trigger listener, STT URL: {}", config.local_stt_url));
         trigger::start_trigger_listener(Arc::new(config.clone()));
+    } else {
+        log::info("main", "No local STT URL configured, trigger listener disabled");
     }
 
     tauri::Builder::default()
         .setup(|app| {
             let app_handle = app.handle();
 
-            // Start global hotkey (F13) if enabled in config
+            // Start global hotkey (F10) if enabled in config
             {
                 let cfg = CURRENT_CONFIG.lock().unwrap();
                 if let Some(ref c) = *cfg {
                     if c.global_hotkey_enabled {
+                        log::info("main", "Starting F10 global hotkey");
                         hotkey::start(app_handle.clone());
+                    } else {
+                        log::info("main", "Global hotkey disabled in config");
                     }
                 }
             }
 
             // Poll trigger detection and events in a background thread
             let app_handle = app.handle();
+            log::info("main", "Starting trigger polling thread (200ms)");
             thread::spawn(move || {
                 loop {
                     // Emit trigger listener's heard texts for UI echo
@@ -537,20 +580,30 @@ fn main() {
 
                     if trigger::is_trigger_detected() {
                         let text = trigger::last_trigger_text();
-                        eprintln!("[Trigger] Action: {}", text);
+                        log::info("trigger", &format!("Action: {}", text));
                         match text.as_str() {
                             "stop" => {
                                 SHOULD_STOP.store(true, Ordering::SeqCst);
                             }
                             _ => {
-                                // start: invoke the command directly
+                                // start: invoke recording with proper error handling
                                 let cfg = CURRENT_CONFIG.lock().unwrap().clone();
                                 if let Some(cfg) = cfg {
-                                    let _ = start_recording_inner(
+                                    match start_recording_inner(
                                         app_handle.clone(),
                                         None,
                                         &cfg,
-                                    );
+                                    ) {
+                                        Ok(()) => {
+                                            log::info("trigger", "Recording started via trigger phrase");
+                                        }
+                                        Err(e) => {
+                                            log::error("trigger", &format!("Failed to start: {}", e));
+                                            let _ = app_handle.emit_all("recording-error", e);
+                                        }
+                                    }
+                                } else {
+                                    log::error("trigger", "Config not loaded, cannot start recording");
                                 }
                             }
                         }

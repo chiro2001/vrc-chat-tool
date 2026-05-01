@@ -11,6 +11,10 @@ use crate::audio::capture::AudioCapture;
 static TRIGGER_DETECTED: AtomicBool = AtomicBool::new(false);
 static LAST_TRIGGER_TEXT: Mutex<String> = Mutex::new(String::new());
 static TRIGGER_PAUSED: AtomicBool = AtomicBool::new(false);
+static TRIGGER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Capture stop signal (set externally to stop the trigger listener's audio stream).
+static CAPTURE_STOP: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
 /// Ring buffer of recently heard texts (for UI echo, max 20 entries).
 static HEARD_TEXTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -81,6 +85,19 @@ pub fn is_paused() -> bool {
     TRIGGER_PAUSED.load(Ordering::Relaxed)
 }
 
+/// Check whether the trigger listener is currently running.
+pub fn is_active() -> bool {
+    TRIGGER_ACTIVE.load(Ordering::Relaxed)
+}
+
+/// Stop the trigger listener's audio capture thread (for clean restart).
+/// The STT loop will exit when the capture channel closes.
+pub fn stop_capture() {
+    if let Some(ref signal) = *CAPTURE_STOP.lock().unwrap() {
+        signal.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Set stop detected from main recording pipeline (stop phrase detected in ASR output).
 pub fn set_stop_detected() {
     TRIGGER_DETECTED.store(true, Ordering::SeqCst);
@@ -89,25 +106,35 @@ pub fn set_stop_detected() {
 }
 
 /// Start the trigger listener in a background thread.
-/// Returns immediately. The thread runs until the app exits.
+/// Returns immediately. The thread runs until stopped externally or app exits.
 pub fn start_trigger_listener(config: Arc<AppConfig>) {
+    if TRIGGER_ACTIVE.swap(true, Ordering::SeqCst) {
+        crate::log::debug("trigger", "Listener already running, skipping start");
+        return;
+    }
+
     let start_phrase = config.trigger_start.clone();
     let stop_phrase = config.trigger_stop.clone();
     let local_url = config.local_stt_url.clone();
 
     if local_url.is_empty() {
-        eprintln!("[Trigger] No local STT URL configured, trigger listener disabled");
+        crate::log::info("trigger", "No local STT URL configured, trigger listener disabled");
+        TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
         return;
     }
 
     thread::spawn(move || {
-        eprintln!("[Trigger] Starting always-on listener...");
+        crate::log::info("trigger", "Starting always-on listener...");
 
         // Find an input device
         let capture = match AudioCapture::new() {
-            Ok(c) => c,
+            Ok(c) => {
+                crate::log::info("trigger", &format!("Audio device opened: {} ({} Hz)", c.name(), c.sample_rate()));
+                c
+            }
             Err(e) => {
-                eprintln!("[Trigger] Failed to open audio device: {}", e);
+                crate::log::error("trigger", &format!("Failed to open audio device: {}", e));
+                TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
                 return;
             }
         };
@@ -115,6 +142,12 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
         let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
         let stop_signal = Arc::new(AtomicBool::new(false));
         let capture_stop = stop_signal.clone();
+
+        // Store capture stop signal so external code can stop it
+        {
+            let mut guard = CAPTURE_STOP.lock().unwrap();
+            *guard = Some(stop_signal.clone());
+        }
 
         // Spawn audio capture thread
         thread::spawn(move || {
@@ -143,25 +176,37 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                 capture_stop,
             );
             if let Err(e) = result {
-                eprintln!("[Trigger] Audio capture error: {}", e);
+                crate::log::error("trigger", &format!("Audio capture error: {}", e));
             }
+            crate::log::debug("trigger", "Audio capture thread exited");
         });
 
         // Run the STT WebSocket client
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                crate::log::error("trigger", &format!("Failed to create tokio runtime: {}", e));
+                stop_signal.store(true, Ordering::SeqCst);
+                TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+
         rt.block_on(async {
             let url = local_url.clone();
-            eprintln!("[Trigger] Connecting to local STT: {}", url);
+            crate::log::info("trigger", &format!("Connecting to local STT: {}", url));
 
             let ws = match tokio_tungstenite::connect_async(&url).await {
-                Ok((ws, _)) => ws,
+                Ok((ws, _)) => {
+                    crate::log::info("trigger", "Connected to local STT");
+                    ws
+                }
                 Err(e) => {
-                    eprintln!("[Trigger] Failed to connect: {}", e);
+                    crate::log::error("trigger", &format!("Failed to connect to local STT: {}", e));
                     return;
                 }
             };
             let (mut write, mut read) = ws.split();
-            eprintln!("[Trigger] Connected to local STT");
 
             loop {
                 tokio::select! {
@@ -182,7 +227,10 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
                                 let _ = write.send(Message::Binary(bytes)).await;
                             }
-                            None => break,
+                            None => {
+                                crate::log::debug("trigger", "PCM channel closed, exiting STT loop");
+                                break;
+                            }
                         }
                     }
                     msg = read.next() => {
@@ -192,6 +240,8 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                                     if let Some(t) = resp.get("text").and_then(|v| v.as_str()) {
                                         let trimmed = t.trim();
                                         if trimmed.is_empty() { continue; }
+
+                                        crate::log::debug("trigger", &format!("STT heard: '{}'", trimmed));
 
                                         // Store for UI echo (ring buffer)
                                         {
@@ -204,25 +254,43 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
                                         // Check trigger phrases (punctuation-tolerant)
                                         if matches_trigger(trimmed, &start_phrase) {
-                                            eprintln!("[Trigger] START detected: '{}'", trimmed);
+                                            crate::log::info("trigger", &format!("START detected: '{}'", trimmed));
                                             TRIGGER_DETECTED.store(true, Ordering::SeqCst);
                                             *LAST_TRIGGER_TEXT.lock().unwrap() = "start".to_string();
                                         } else if matches_trigger(trimmed, &stop_phrase) {
-                                            eprintln!("[Trigger] STOP detected: '{}'", trimmed);
+                                            crate::log::info("trigger", &format!("STOP detected: '{}'", trimmed));
                                             TRIGGER_DETECTED.store(true, Ordering::SeqCst);
                                             *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
                                         }
                                     }
                                 }
                             }
-                            _ => {}
+                            Some(Ok(Message::Close(_))) => {
+                                crate::log::warn("trigger", "STT server closed connection");
+                                break;
+                            }
+                            Some(Ok(_)) => {
+                                // Binary, Ping, Pong — ignore
+                            }
+                            Some(Err(e)) => {
+                                crate::log::error("trigger", &format!("STT WebSocket error: {}", e));
+                                break;
+                            }
+                            None => break,
                         }
                     }
                 }
             }
         });
 
+        // Cleanup: signal capture to stop if still running, clear state
         stop_signal.store(true, Ordering::SeqCst);
+        {
+            let mut guard = CAPTURE_STOP.lock().unwrap();
+            *guard = None;
+        }
+        TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+        crate::log::info("trigger", "Listener stopped");
     });
 }
 

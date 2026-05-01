@@ -100,6 +100,16 @@ impl AudioCapture {
         Ok(Self { device, config })
     }
 
+    /// Human-readable device name (for logging).
+    pub fn name(&self) -> String {
+        self.device.name().unwrap_or_else(|_| "Unknown".to_string())
+    }
+
+    /// Configured sample rate (Hz).
+    pub fn sample_rate(&self) -> u32 {
+        self.config.sample_rate.0
+    }
+
     pub fn capture_streaming<F>(
         &self,
         on_chunk: F,
