@@ -130,6 +130,7 @@ pub struct AppConfig {
     pub osc_enabled: bool,
     pub trigger_start: String,
     pub trigger_stop: String,
+    pub global_hotkey_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -146,6 +147,7 @@ impl Default for AppConfig {
             osc_enabled: true,
             trigger_start: "开始语音识别".to_string(),
             trigger_stop: "结束语音识别".to_string(),
+            global_hotkey_enabled: true,
         }
     }
 }

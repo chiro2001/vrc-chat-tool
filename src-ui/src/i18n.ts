@@ -70,6 +70,8 @@ const translations: Record<Lang, Record<string, string>> = {
     "config.confirmReset": "确认恢复所有设置为默认值？",
     "config.resetYes": "确认恢复",
     "config.resetNo": "取消",
+    "config.hotkey": "全局热键",
+    "config.hotkeyEnabled": "启用热键 (F10 切换录音)",
   },
   en: {
     "app.title": "VRC Voice OSC",
@@ -132,6 +134,8 @@ const translations: Record<Lang, Record<string, string>> = {
     "config.confirmReset": "Reset all settings to defaults?",
     "config.resetYes": "Reset",
     "config.resetNo": "Cancel",
+    "config.hotkey": "Global Hotkey",
+    "config.hotkeyEnabled": "Enable F10 Hotkey Toggle",
   },
 };
 

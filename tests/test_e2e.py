@@ -321,6 +321,98 @@ def test_trigger_matching():
     return all(results)
 
 
+def test_trigger_flow(e2e_proc):
+    """Test full trigger flow: start recording, verify, stop recording, get result.
+    Requires E2E server running with VB-Cable and configured ASR credentials.
+    Uses dry_run=false to actually start/stop recording via /inject_stt."""
+    import json
+    import urllib.request
+
+    base_url = "http://127.0.0.1:9876"
+    print("\n--- Full Trigger Flow Test ---")
+
+    # 1. Inject start trigger
+    body = json.dumps({"text": "开始语音识别", "dry_run": False}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/inject_stt",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        trigger = data.get("trigger", "error")
+        print(f"  [OK] {data.get('action', '?')} (trigger={trigger})")
+    except urllib.request.URLError as e:
+        print(f"  [FAIL] Cannot connect to E2E server: {e}")
+        return False
+
+    # 2. Verify recording started by polling /status
+    time.sleep(0.5)
+    recording = False
+    for attempt in range(10):
+        try:
+            with urllib.request.urlopen(f"{base_url}/status", timeout=2) as resp:
+                status = json.loads(resp.read().decode("utf-8"))
+            recording = status.get("recording", False)
+            if recording:
+                print(f"  [OK] Recording started (attempt {attempt+1})")
+                break
+        except urllib.request.URLError:
+            pass
+        time.sleep(0.3)
+    if not recording:
+        print("  [FAIL] Recording did not start after trigger injection")
+        return False
+
+    # 3. Inject stop trigger
+    body = json.dumps({"text": "结束语音识别", "dry_run": False}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/inject_stt",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        print(f"  [OK] {data.get('action', '?')} (trigger={data.get('trigger', '?')})")
+    except urllib.request.URLError as e:
+        print(f"  [FAIL] Cannot connect to E2E server: {e}")
+        return False
+
+    # 4. Wait for recording to stop (ASR processing takes time)
+    time.sleep(2.0)
+    stopped = False
+    for attempt in range(10):
+        try:
+            with urllib.request.urlopen(f"{base_url}/status", timeout=2) as resp:
+                status = json.loads(resp.read().decode("utf-8"))
+            recording = status.get("recording", False)
+            if not recording:
+                stopped = True
+                print(f"  [OK] Recording stopped (attempt {attempt+1})")
+                break
+        except urllib.request.URLError:
+            pass
+        time.sleep(0.5)
+    if not stopped:
+        print("  [WARN] Recording did not stop within timeout (may still be processing)")
+
+    # 5. Get result
+    try:
+        with urllib.request.urlopen(f"{base_url}/result", timeout=5) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        text = result.get("text", "")
+        print(f"  [OK] Result text: '{text}' (length={len(text)})")
+        # Don't require non-empty text — ASR may not understand VB-Cable audio
+        return True
+    except urllib.request.URLError as e:
+        print(f"  [FAIL] Cannot connect to E2E server: {e}")
+        return False
+
+
 def main():
     print("=" * 60)
     print("VRC Chat Tool - E2E Tests")
@@ -350,24 +442,32 @@ def main():
     e2e_proc = start_e2e_server()
     if e2e_proc:
         trigger_ok = test_trigger_matching()
+        results.append(trigger_ok)
+
+        # Full trigger flow test
+        flow_ok = test_trigger_flow(e2e_proc)
+        results.append(flow_ok)
+
         stop_e2e_server(e2e_proc)
     else:
         print("\n--- Trigger Phrase Matching Tests ---")
         print("  [SKIP] E2E server binary not built")
-        trigger_ok = True
-    results.append(trigger_ok)
+        results.append(True)  # trigger_ok
+        results.append(True)  # flow_ok
 
     # Summary
     print("\n" + "=" * 60)
     passed = sum(1 for r in results if r)
     total = len(results)
     print(f"RESULTS: {passed}/{total} tests passed")
-    # Audio tests first, then trigger
+    # Audio tests first, then trigger matching, then flow
     for i, test in enumerate(audio_tests):
         r = results[i]
         print(f"  [{('PASS' if r else 'FAIL')}] Audio: {test['name']}")
     trigger_result = results[len(audio_tests)] if len(results) > len(audio_tests) else True
     print(f"  [{('PASS' if trigger_result else 'FAIL')}] Trigger: phrase matching")
+    flow_result = results[len(audio_tests) + 1] if len(results) > len(audio_tests) + 1 else True
+    print(f"  [{('PASS' if flow_result else 'FAIL')}] Trigger: full start-stop flow")
     print("=" * 60)
 
     sys.exit(0 if all(results) else 1)

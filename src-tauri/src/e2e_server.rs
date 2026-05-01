@@ -231,14 +231,26 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
         creds.secret_key.clone(),
     );
 
+    let trigger_stop_partial = cfg.trigger_stop.clone();
+    let trigger_stop_sentence = cfg.trigger_stop.clone();
+
     let rt = tokio::runtime::Runtime::new()?;
     let recognized_text = rt.block_on(async {
         recognizer.recognize_pcm_stream(
             pcm_rx,
             asr_stop,
             16000,
-            |_partial| {},
+            move |partial: &str| {
+                if trigger::matches_trigger(partial, &trigger_stop_partial) {
+                    eprintln!("[E2E] STOP detected in partial: '{}'", partial);
+                    SHOULD_STOP_E2E.store(true, Ordering::SeqCst);
+                }
+            },
             move |sentence: &str| {
+                if trigger::matches_trigger(sentence, &trigger_stop_sentence) {
+                    eprintln!("[E2E] STOP detected in sentence: '{}'", sentence);
+                    SHOULD_STOP_E2E.store(true, Ordering::SeqCst);
+                }
                 let s = sentence.trim().to_string();
                 if !s.is_empty() {
                     eprintln!("[E2E] Sentence: {}", s);

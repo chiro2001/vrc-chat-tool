@@ -166,6 +166,21 @@ header h1 {
   flex-shrink: 0;
 }
 
+/* ---- Trigger Heard (always-on listener echo) ---- */
+.trigger-heard {
+  padding: 0.25rem 0.5rem;
+  background: rgba(77, 166, 255, 0.08);
+  border-left: 2px solid #4da6ff;
+  border-radius: 3px;
+  margin-top: 0.25rem;
+}
+
+.trigger-heard-text {
+  font-size: 0.75rem;
+  color: #8bbfff;
+  word-break: break-all;
+}
+
 /* ---- Record Button ---- */
 .record-button {
   padding: 0.65rem 1.5rem;

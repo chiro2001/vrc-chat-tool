@@ -17,6 +17,7 @@ interface AppConfig {
   trigger_stop: string;
   asr_provider: string;
   local_stt_url: string;
+  global_hotkey_enabled: boolean;
 }
 
 interface AudioDevice {
@@ -57,6 +58,9 @@ function App() {
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceIndex, setSelectedDeviceIndex] = useState(0);
 
+  // Trigger listener echo
+  const [triggerHeardText, setTriggerHeardText] = useState("");
+
   // Config
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [config, setConfig] = useState<AppConfig>({
@@ -71,6 +75,7 @@ function App() {
     trigger_stop: "停止录音",
     asr_provider: "tencent",
     local_stt_url: "ws://192.168.101.7:8765",
+    global_hotkey_enabled: true,
   });
 
   // Load config on mount
@@ -108,6 +113,7 @@ function App() {
       setCurrentPartial("");
       setLastResult("");
       setLastError("");
+      setTriggerHeardText("");
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-partial", (event) => {
@@ -135,6 +141,14 @@ function App() {
 
     listen<number>("volume-update", (event) => {
       setCurrentVolume(event.payload);
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("hotkey-toggle", () => {
+      toggleRecordingRef.current();
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("trigger-heard", (event) => {
+      setTriggerHeardText(event.payload);
     }).then((fn) => unlisteners.push(fn));
 
     return () => {
@@ -175,6 +189,12 @@ function App() {
       );
     }
   }, [apiState, selectedDeviceIndex]);
+
+  // Ref for hotkey listener to always have latest toggleRecording
+  const toggleRecordingRef = useRef(toggleRecording);
+  useEffect(() => {
+    toggleRecordingRef.current = toggleRecording;
+  }, [toggleRecording]);
 
   // Test recording functions
   const loadRecordings = useCallback(() => {
@@ -290,6 +310,12 @@ function App() {
             {t("control.volume")} {(currentVolume * 100).toFixed(0)}%
           </span>
         </div>
+
+        {triggerHeardText && !isRecording && (
+          <div className="trigger-heard">
+            <span className="trigger-heard-text">{triggerHeardText}</span>
+          </div>
+        )}
 
         <div className="action-buttons">
           <button className="test-modal-trigger" onClick={() => setShowTestModal(true)}>
@@ -479,6 +505,15 @@ function App() {
               <div className="config-field">
                 <label>{t("config.triggerStop")}</label>
                 <input type="text" value={config.trigger_stop} onChange={(e) => updateConfig("trigger_stop", e.target.value)} />
+              </div>
+
+              <h3>{t("config.hotkey")}</h3>
+              <div className="config-field">
+                <label>
+                  <input type="checkbox" checked={config.global_hotkey_enabled}
+                    onChange={(e) => updateConfig("global_hotkey_enabled", e.target.checked)} />
+                  {t("config.hotkeyEnabled")}
+                </label>
               </div>
 
               <div className="config-reset-section">

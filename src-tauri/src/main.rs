@@ -5,6 +5,7 @@ use vrc_chat_tool::audio;
 use vrc_chat_tool::speech;
 use vrc_chat_tool::osc;
 use vrc_chat_tool::trigger;
+use vrc_chat_tool::hotkey;
 
 mod e2e_server;
 mod history;
@@ -222,11 +223,23 @@ fn get_config() -> Option<config::AppConfig> {
 }
 
 #[tauri::command]
-fn save_config(config: config::AppConfig) -> Result<(), String> {
+fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(), String> {
+    // Check if hotkey setting changed
+    let hotkey_was_enabled = CURRENT_CONFIG.lock().unwrap()
+        .as_ref().map(|c| c.global_hotkey_enabled).unwrap_or(false);
+
     if let Err(e) = config.save() {
         return Err(format!("Failed to save config: {}", e));
     }
-    *CURRENT_CONFIG.lock().unwrap() = Some(config);
+    *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
+
+    // Start or stop global hotkey based on new config
+    if config.global_hotkey_enabled && !hotkey_was_enabled {
+        hotkey::start(app.clone());
+    } else if !config.global_hotkey_enabled && hotkey_was_enabled {
+        hotkey::stop();
+    }
+
     Ok(())
 }
 
@@ -266,7 +279,12 @@ fn start_recording_inner(
 
     SHOULD_STOP.store(false, Ordering::SeqCst);
 
+    // Pause trigger listener's audio sending — main pipeline handles STT during recording
+    trigger::pause_audio();
+
     let cfg = cfg.clone();
+    let trigger_stop_partial = cfg.trigger_stop.clone();
+    let trigger_stop_sentence = cfg.trigger_stop.clone();
     thread::spawn(move || {
         emit_log(&app, "info", "recorder", "Recording started");
         let result: Result<String, anyhow::Error> = (|| -> anyhow::Result<String> {
@@ -374,6 +392,11 @@ fn start_recording_inner(
                         if let Some(ref osc) = osc_for_partial {
                             let _ = osc.send_partial(partial_text);
                         }
+                        // Check stop trigger phrase in ASR output
+                        if trigger::matches_trigger(partial_text, &trigger_stop_partial) {
+                            eprintln!("[Trigger] STOP detected in partial: '{}'", partial_text);
+                            SHOULD_STOP.store(true, Ordering::SeqCst);
+                        }
                     },
                     move |sentence_text: &str| {
                         let _ = app_sentence.emit_all("recording-sentence", sentence_text.to_string());
@@ -381,6 +404,11 @@ fn start_recording_inner(
                             let _ = osc.send_chatbox(sentence_text);
                         }
                         history::add_entry(sentence_text, "asr");
+                        // Check stop trigger phrase in sentence output
+                        if trigger::matches_trigger(sentence_text, &trigger_stop_sentence) {
+                            eprintln!("[Trigger] STOP detected in sentence: '{}'", sentence_text);
+                            SHOULD_STOP.store(true, Ordering::SeqCst);
+                        }
                     },
                 ).await
             })?;
@@ -397,6 +425,9 @@ fn start_recording_inner(
 
             Ok(recognized_text)
         })();
+
+        // Always resume trigger listener audio after recording stops
+        trigger::resume_audio();
 
         match result {
             Ok(text) => {
@@ -462,6 +493,12 @@ fn main() {
     let config = config::AppConfig::load().unwrap_or_default();
     *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
 
+    // Enable global hotkey (F13) at startup if configured
+    if config.global_hotkey_enabled {
+        // We need an app handle for hotkey, but we don't have one yet.
+        // Defer to Tauri setup.
+    }
+
     // Start always-on trigger listener (local STT for voice commands)
     // Always start if local_stt_url is configured, regardless of asr_provider
     if !config.local_stt_url.is_empty() {
@@ -470,10 +507,34 @@ fn main() {
 
     tauri::Builder::default()
         .setup(|app| {
-            // Poll trigger detection in a background thread
+            let app_handle = app.handle();
+
+            // Start global hotkey (F13) if enabled in config
+            {
+                let cfg = CURRENT_CONFIG.lock().unwrap();
+                if let Some(ref c) = *cfg {
+                    if c.global_hotkey_enabled {
+                        hotkey::start(app_handle.clone());
+                    }
+                }
+            }
+
+            // Poll trigger detection and events in a background thread
             let app_handle = app.handle();
             thread::spawn(move || {
                 loop {
+                    // Emit trigger listener's heard texts for UI echo
+                    for text in trigger::drain_heard_texts() {
+                        let _ = app_handle.emit_all("trigger-heard", text);
+                    }
+
+                    // Emit trigger listener's volume for UI meter
+                    // Only when not recording (main pipeline handles volume during recording)
+                    if !trigger::is_paused() {
+                        let vol = trigger::latest_trigger_volume();
+                        let _ = app_handle.emit_all("volume-update", vol);
+                    }
+
                     if trigger::is_trigger_detected() {
                         let text = trigger::last_trigger_text();
                         eprintln!("[Trigger] Action: {}", text);

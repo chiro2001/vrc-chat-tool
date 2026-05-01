@@ -10,6 +10,14 @@ use crate::audio::capture::AudioCapture;
 
 static TRIGGER_DETECTED: AtomicBool = AtomicBool::new(false);
 static LAST_TRIGGER_TEXT: Mutex<String> = Mutex::new(String::new());
+static TRIGGER_PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// Ring buffer of recently heard texts (for UI echo, max 20 entries).
+static HEARD_TEXTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+const MAX_HEARD_TEXTS: usize = 20;
+
+/// Latest volume computed by trigger listener's audio capture.
+static LATEST_VOLUME: Mutex<f32> = Mutex::new(0.0);
 
 /// Strip common Chinese and ASCII punctuation from text for matching.
 /// Preserves alphanumeric characters and whitespace.
@@ -18,7 +26,8 @@ pub fn strip_punctuation(s: &str) -> String {
         .filter(|c| {
             !c.is_ascii_punctuation()
                 && !matches!(c,
-                    '，' | '。' | '、' | '；' | '：' | '？' | '！' | '“' | '”' | '‘' | '’'
+                    '，' | '。' | '、' | '；' | '：' | '？' | '！'
+                    | '\u{201c}' | '\u{201d}' | '\u{2018}' | '\u{2019}'
                     | '「' | '」' | '【' | '】' | '（' | '）' | '《' | '》' | '…'
                     | '·' | '～' | '〈' | '〉' | '｛' | '｝'
                 )
@@ -41,6 +50,44 @@ pub fn last_trigger_text() -> String {
     LAST_TRIGGER_TEXT.lock().unwrap().clone()
 }
 
+/// Drain all heard texts from the trigger listener (for UI echo).
+pub fn drain_heard_texts() -> Vec<String> {
+    let mut buf = HEARD_TEXTS.lock().unwrap();
+    if buf.is_empty() {
+        return Vec::new();
+    }
+    std::mem::take(&mut *buf)
+}
+
+/// Get the latest volume from the trigger listener's audio capture.
+pub fn latest_trigger_volume() -> f32 {
+    *LATEST_VOLUME.lock().unwrap()
+}
+
+/// Pause trigger listener's audio sending (recording is active — main pipeline handles STT).
+pub fn pause_audio() {
+    TRIGGER_PAUSED.store(true, Ordering::SeqCst);
+    eprintln!("[Trigger] Audio paused (recording active)");
+}
+
+/// Resume trigger listener's audio sending (recording stopped).
+pub fn resume_audio() {
+    TRIGGER_PAUSED.store(false, Ordering::SeqCst);
+    eprintln!("[Trigger] Audio resumed");
+}
+
+/// Check if trigger listener's audio is paused.
+pub fn is_paused() -> bool {
+    TRIGGER_PAUSED.load(Ordering::Relaxed)
+}
+
+/// Set stop detected from main recording pipeline (stop phrase detected in ASR output).
+pub fn set_stop_detected() {
+    TRIGGER_DETECTED.store(true, Ordering::SeqCst);
+    *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
+    eprintln!("[Trigger] STOP detected from main pipeline");
+}
+
 /// Start the trigger listener in a background thread.
 /// Returns immediately. The thread runs until the app exits.
 pub fn start_trigger_listener(config: Arc<AppConfig>) {
@@ -48,8 +95,8 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
     let stop_phrase = config.trigger_stop.clone();
     let local_url = config.local_stt_url.clone();
 
-    if local_url.is_empty() || config.asr_provider != "local" {
-        eprintln!("[Trigger] No local STT configured, trigger listener disabled");
+    if local_url.is_empty() {
+        eprintln!("[Trigger] No local STT URL configured, trigger listener disabled");
         return;
     }
 
@@ -73,6 +120,24 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
         thread::spawn(move || {
             let result = capture.capture_streaming(
                 move |chunk: Vec<u8>| {
+                    // Always compute volume for UI display
+                    if chunk.len() >= 2 {
+                        let sum: f64 = chunk.chunks(2)
+                            .map(|pair| {
+                                let sample = i16::from_le_bytes([pair[0], pair[1]]) as f64;
+                                sample * sample
+                            }).sum();
+                        let rms = (sum / (chunk.len() / 2) as f64).sqrt();
+                        let volume = ((rms / 32768.0).min(1.0)) as f32;
+                        *LATEST_VOLUME.lock().unwrap() = volume;
+                    }
+
+                    // Skip sending audio to STT if trigger listener is paused
+                    // (main recording pipeline handles audio during active recording)
+                    if TRIGGER_PAUSED.load(Ordering::Relaxed) {
+                        return;
+                    }
+
                     let _ = pcm_tx.blocking_send(chunk);
                 },
                 capture_stop,
@@ -127,6 +192,15 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                                     if let Some(t) = resp.get("text").and_then(|v| v.as_str()) {
                                         let trimmed = t.trim();
                                         if trimmed.is_empty() { continue; }
+
+                                        // Store for UI echo (ring buffer)
+                                        {
+                                            let mut buf = HEARD_TEXTS.lock().unwrap();
+                                            buf.push(trimmed.to_string());
+                                            if buf.len() > MAX_HEARD_TEXTS {
+                                                buf.remove(0);
+                                            }
+                                        }
 
                                         // Check trigger phrases (punctuation-tolerant)
                                         if matches_trigger(trimmed, &start_phrase) {
@@ -204,5 +278,29 @@ mod tests {
         // Trigger phrase appears within a longer sentence
         assert!(matches_trigger("请开始语音识别吧", "开始语音识别"));
         assert!(matches_trigger("请，开始，语音识别吧", "开始语音识别"));
+    }
+
+    #[test]
+    fn test_drain_heard_texts() {
+        {
+            let mut buf = HEARD_TEXTS.lock().unwrap();
+            buf.clear();
+            buf.push("hello".to_string());
+            buf.push("world".to_string());
+        }
+        let texts = drain_heard_texts();
+        assert_eq!(texts, vec!["hello", "world"]);
+        // Should be empty after drain
+        let texts2 = drain_heard_texts();
+        assert!(texts2.is_empty());
+    }
+
+    #[test]
+    fn test_pause_resume() {
+        assert!(!TRIGGER_PAUSED.load(Ordering::SeqCst));
+        pause_audio();
+        assert!(TRIGGER_PAUSED.load(Ordering::SeqCst));
+        resume_audio();
+        assert!(!TRIGGER_PAUSED.load(Ordering::SeqCst));
     }
 }
