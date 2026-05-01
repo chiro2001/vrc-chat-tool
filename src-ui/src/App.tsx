@@ -97,10 +97,13 @@ function App() {
   // STT model status
   interface SttModelStatus { exists: boolean; model_name: string; missing_files: string[]; model_dir: string; }
   interface DownloadProgress { phase: string; current: number; total: number; }
+  interface AvailableModel { name: string; display_name: string; size_bytes: number; files: { encoder: string; decoder: string; joiner: string; tokens: string; }; }
   const [modelStatus, setModelStatus] = useState<SttModelStatus | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({ phase: "", current: 0, total: 0 });
   const [downloadError, setDownloadError] = useState("");
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
+  const [currentModelName, setCurrentModelName] = useState("");
 
   // Load config on mount
   useEffect(() => {
@@ -111,6 +114,11 @@ function App() {
       .catch((e) => {
         console.error("Failed to load config:", e);
       });
+
+    // Load available STT models
+    invoke<AvailableModel[]>("get_available_models")
+      .then((models) => setAvailableModels(models))
+      .catch(console.error);
 
     // Load audio devices
     invoke<AudioDevice[]>("list_audio_devices")
@@ -132,7 +140,10 @@ function App() {
   useEffect(() => {
     if (config.asr_provider === "local_embedded" || config.trigger_stt_provider === "local_embedded") {
       invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path })
-        .then(setModelStatus)
+        .then((status) => {
+          setModelStatus(status);
+          setCurrentModelName(status.model_name);
+        })
         .catch(() => setModelStatus(null));
     } else {
       setModelStatus(null);
@@ -247,7 +258,10 @@ function App() {
       setDownloadProgress({ phase: "complete", current: 0, total: 0 });
       // Re-check model status after download
       invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path })
-        .then(setModelStatus)
+        .then((status) => {
+          setModelStatus(status);
+          setCurrentModelName(status.model_name);
+        })
         .catch(() => setModelStatus(null));
     }).then((fn) => unlisteners.push(fn));
 
@@ -596,8 +610,26 @@ function App() {
               ) : config.asr_provider === "local_embedded" ? (
                 <>
                   <div className="config-field">
-                    <label>{t("config.sttConfigPath")}</label>
-                    <input type="text" value={config.stt_config_path} onChange={(e) => updateConfig("stt_config_path", e.target.value)} />
+                    <label>模型选择</label>
+                    <select
+                      value={currentModelName}
+                      onChange={async (e) => {
+                        const name = e.target.value;
+                        setCurrentModelName(name);
+                        try {
+                          await invoke("set_stt_model", { sttConfigPath: config.stt_config_path, modelName: name });
+                          // Refresh model status
+                          const status = await invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path });
+                          setModelStatus(status);
+                        } catch (err) {
+                          console.error("Failed to switch model:", err);
+                        }
+                      }}
+                    >
+                      {availableModels.map((m) => (
+                        <option key={m.name} value={m.name}>{m.display_name}</option>
+                      ))}
+                    </select>
                   </div>
                   {/* Model status & download */}
                   <div className="config-field model-status-section">
