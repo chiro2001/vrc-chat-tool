@@ -32,5 +32,8 @@ rfd = "0.15"
 # Timestamps
 chrono = "0.4"
 
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
 # Error handling
 anyhow = "1"

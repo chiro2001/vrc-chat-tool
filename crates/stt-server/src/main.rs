@@ -34,8 +34,7 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -88,7 +87,10 @@ async fn main() -> Result<()> {
             config.validate_model_paths()?;
 
             let server = stt_server::SttServer::new(config)?;
-            server.run().await?;
+
+            // Create tokio runtime for the actix-web server
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async { server.run().await })?;
         }
         Commands::Download { force, no_punct } => {
             if !stt_server::download::check_network_connectivity() {

@@ -127,20 +127,99 @@ impl Default for PunctuationConfig {
     }
 }
 
+/// Search for a config file. Order:
+/// 1. Current working directory
+/// 2. Each parent directory up to root
+/// 3. Executable's directory (for production builds)
+/// 4. Executable's parent dir → grandparent (for dev: target/debug → project root)
+fn find_config_file(name: &str) -> Option<PathBuf> {
+    // 1. CWD-relative
+    let cwd = Path::new(name);
+    if cwd.exists() {
+        return Some(cwd.to_path_buf());
+    }
+
+    // 2. Search upward from CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = cwd.as_path();
+        loop {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+            match dir.parent() {
+                Some(parent) => dir = parent,
+                None => break,
+            }
+        }
+    }
+
+    // 3. Exe directory
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let candidate = exe_dir.join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+            // 4. Exe's parent → grandparent (target/debug → target → project dir)
+            if let Some(parent) = exe_dir.parent() {
+                let candidate = parent.join(name);
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+                if let Some(grandparent) = parent.parent() {
+                    let candidate = grandparent.join(name);
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                    // 6. Exe's grandparent subdirectories (workspace crate pattern)
+                    //    e.g. target/debug → target → project-root, then crates/stt-server/
+                    for subdir in &["crates/stt-server", "src-tauri"] {
+                        let candidate = grandparent.join(subdir).join(name);
+                        if candidate.exists() {
+                            return Some(candidate);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 impl Config {
     /// Load configuration from a YAML file.
+    ///
+    /// If the exact path doesn't exist, searches CWD → parent dirs → exe dir
+    /// for a file named `config.yaml` (or whatever `path` specifies).
     ///
     /// Resolves relative model paths against the config file's parent directory,
     /// matching the Python version's behavior.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+        let requested = path.as_ref();
+        let resolved = if requested.exists() {
+            requested.to_path_buf()
+        } else if requested.is_absolute() {
+            // Absolute path that doesn't exist — no fallback
+            anyhow::bail!("Config file not found: {}", requested.display());
+        } else {
+            // Try auto-discovery
+            let name = requested
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("config.yaml");
+            find_config_file(name)
+                .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", requested.display()))?
+        };
+
         let content =
-            std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
+            std::fs::read_to_string(&resolved).with_context(|| format!("Failed to read {}", resolved.display()))?;
         let mut config: Config =
             serde_yaml::from_str(&content).with_context(|| "Failed to parse YAML config")?;
 
         // Resolve relative model paths against config file's parent directory
-        let config_dir = path
+        let config_dir = resolved
             .parent()
             .unwrap_or(Path::new("."))
             .to_path_buf();

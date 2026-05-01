@@ -29,6 +29,17 @@ enum RecState {
     Recording,
 }
 
+/// Configuration for automated test mode.
+#[derive(Clone)]
+pub struct TestConfig {
+    pub url: String,
+    pub device: Option<String>,
+    pub source: String,     // "mic" or "file"
+    pub wav_path: Option<String>,
+    pub timeout_secs: u64,
+    pub output_path: String,
+}
+
 pub struct SttGuiApp {
     // Config
     server_url: String,
@@ -55,6 +66,12 @@ pub struct SttGuiApp {
 
     // Config persistence
     config_path: PathBuf,
+
+    // Test mode
+    test_config: Option<TestConfig>,
+    test_started: bool,
+    /// Instant when recording started (for timeout tracking)
+    test_start_time: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -76,6 +93,65 @@ enum LogLevel {
 }
 
 impl SttGuiApp {
+    /// Set the server URL (used by CLI override before first frame).
+    pub fn set_server_url(&mut self, url: String) {
+        self.server_url = url;
+    }
+
+    /// Set test configuration for automated E2E testing.
+    pub fn set_test_config(&mut self, cfg: TestConfig) {
+        self.test_config = Some(cfg);
+    }
+
+    /// Save test results as JSON and close the window.
+    fn finish_test(&mut self, ctx: &egui::Context, status: &str) {
+        // Clone everything we need, then clear test_config to prevent re-entry
+        let output_path_raw = match &self.test_config {
+            Some(tc) => tc.output_path.clone(),
+            None => return,
+        };
+
+        self.test_config = None;
+        self.stop(); // ensure worker stopped
+
+        let result = serde_json::json!({
+            "status": status,
+            "segments": self.segments.iter().map(|(id, txt)| {
+                serde_json::json!({"segment": id, "text": txt})
+            }).collect::<Vec<_>>(),
+            "partial": self.partial_text,
+            "total_segments": self.segments.len(),
+        });
+
+        let output_path = if std::path::Path::new(&output_path_raw).is_absolute() {
+            std::path::PathBuf::from(&output_path_raw)
+        } else {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(&output_path_raw)
+        };
+
+        if let Some(parent) = output_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&output_path, &json) {
+                    eprintln!("[test] Failed to write results to {}: {}", output_path.display(), e);
+                } else {
+                    eprintln!("[test] Results saved to {} ({} segments, status={})",
+                        output_path.display(), self.segments.len(), status);
+                }
+            }
+            Err(e) => {
+                eprintln!("[test] Failed to serialize results: {}", e);
+            }
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
     fn start(&mut self) {
         self.stop(); // ensure cleanup
 
@@ -95,7 +171,12 @@ impl SttGuiApp {
 
         match self.source_mode {
             AudioSource::Mic => {
-                worker.start_mic();
+                let device = if self.selected_device.is_empty() || self.selected_device == "Default" {
+                    None
+                } else {
+                    Some(self.selected_device.clone())
+                };
+                worker.start_mic(device);
                 self.add_log(LogLevel::Info, "Started microphone recording...");
             }
             AudioSource::File => {
@@ -183,12 +264,81 @@ impl Default for SttGuiApp {
             show_logs: false,
             volume: 0.0,
             config_path,
+            test_config: None,
+            test_started: false,
+            test_start_time: None,
         }
     }
 }
 
 impl eframe::App for SttGuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ── Test mode: auto-start recording on first frame ──
+        if self.test_config.is_some() && !self.test_started {
+            self.test_started = true;
+            let tc = self.test_config.clone().unwrap();
+
+            if tc.source == "file" {
+                // File source mode - bypass audio device
+                if let Some(ref wav) = tc.wav_path {
+                    self.source_mode = AudioSource::File;
+                    self.file_path = std::path::PathBuf::from(wav);
+                    eprintln!("[test] Auto-starting file mode: {}", wav);
+                } else {
+                    eprintln!("[test] ERROR: --source file requires --wav <path>");
+                    self.finish_test(ctx, "error");
+                    return;
+                }
+            } else {
+                // Mic source mode (default)
+                let device = tc.device.clone();
+                if let Some(ref dev) = device {
+                    if !dev.is_empty() && dev != "Default" {
+                        self.selected_device = dev.clone();
+                    }
+                }
+            }
+
+            let timeout = tc.timeout_secs;
+            let source = tc.source.clone();
+            self.start();
+            self.test_start_time = Some(std::time::Instant::now());
+            eprintln!("[test] Auto-started recording (source={}, timeout={}s)", source, timeout);
+        }
+
+        // ── Test mode: check timeout ──
+        if let Some(ref tc) = self.test_config {
+            if let Some(start) = self.test_start_time {
+                if start.elapsed().as_secs() >= tc.timeout_secs && self.state == RecState::Recording {
+                    eprintln!("[test] Timeout reached ({}s), stopping", tc.timeout_secs);
+                    self.finish_test(ctx, "timeout");
+                    return;
+                }
+            }
+        }
+
+        // ── Test mode: recording finished naturally ──
+        if self.test_config.is_some()
+            && self.test_started
+            && self.state == RecState::Idle
+            && self.segments.len() > 0
+        {
+            self.finish_test(ctx, "completed");
+            return;
+        }
+
+        // ── Test mode: recording stopped with no results (e.g. WS error/disconnect) ──
+        if self.test_config.is_some()
+            && self.test_started
+            && self.state == RecState::Idle
+            && self.segments.is_empty()
+            && self.test_start_time.map_or(false, |t| t.elapsed().as_secs() >= 3)
+        {
+            eprintln!("[test] Recording stopped with no results, finishing...");
+            self.finish_test(ctx, "error");
+            return;
+        }
+
         // Poll worker events
         self.poll_events();
 

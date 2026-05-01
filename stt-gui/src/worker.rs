@@ -40,7 +40,9 @@ impl StreamWorker {
     }
 
     /// Start streaming from microphone.
-    pub fn start_mic(&mut self) {
+    ///
+    /// `device_name` — the name of the input device to use, or None for default.
+    pub fn start_mic(&mut self, device_name: Option<String>) {
         self.stop_internal();
 
         let (stop_tx, stop_rx) = mpsc::channel();
@@ -52,7 +54,7 @@ impl StreamWorker {
         let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                if let Err(e) = run_mic_stream(&url, event_tx, stop_rx).await {
+                if let Err(e) = run_mic_stream(&url, event_tx, stop_rx, device_name).await {
                     // Error already sent via WorkerEvent::Error in run_mic_stream
                     let _ = e;
                 }
@@ -114,6 +116,7 @@ async fn run_mic_stream(
     url: &str,
     event_tx: mpsc::Sender<WorkerEvent>,
     stop_rx: mpsc::Receiver<()>,
+    device_name: Option<String>,
 ) -> anyhow::Result<()> {
     use tokio_tungstenite::connect_async;
     use futures_util::SinkExt;
@@ -137,9 +140,22 @@ async fn run_mic_stream(
 
     let (mut write, read) = ws_stream.split();
 
-    // Start microphone capture
+    // Start microphone capture with optional device selection
     let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>();
-    let _stop_fn = audio::start_mic_capture(audio_tx)?;
+    let stop_fn = match audio::start_mic_capture(audio_tx, device_name.as_deref()) {
+        Ok(f) => f,
+        Err(e) => {
+            let msg = format!("Microphone setup failed: {}", e);
+            let _ = event_tx.send(WorkerEvent::Log {
+                level: "error".into(),
+                message: msg.clone(),
+            });
+            let _ = event_tx.send(WorkerEvent::Error(msg.clone()));
+            // Close WebSocket gracefully before returning
+            let _ = write.close().await;
+            return Err(anyhow::anyhow!(msg));
+        }
+    };
 
     let _ = event_tx.send(WorkerEvent::Log {
         level: "info".into(),
@@ -175,6 +191,9 @@ async fn run_mic_stream(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+
+    // Stop microphone capture before sending silence
+    stop_fn();
 
     // Send silence to flush VAD
     let _ = event_tx.send(WorkerEvent::Log {
