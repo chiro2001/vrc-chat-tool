@@ -256,6 +256,25 @@ fn reset_config() -> Result<config::AppConfig, String> {
 }
 
 #[tauri::command]
+fn get_tencent_credentials() -> Result<config::TencentCredentials, String> {
+    let cfg = CURRENT_CONFIG.lock().unwrap();
+    let credentials_file = cfg.as_ref()
+        .map(|c| c.tencent_credentials_file.clone())
+        .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
+    Ok(config::TencentCredentials::load(&credentials_file))
+}
+
+#[tauri::command]
+fn save_tencent_credentials(app_id: String, secret_id: String, secret_key: String) -> Result<(), String> {
+    let cfg = CURRENT_CONFIG.lock().unwrap();
+    let credentials_file = cfg.as_ref()
+        .map(|c| c.tencent_credentials_file.clone())
+        .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
+    let creds = config::TencentCredentials { app_id, secret_id, secret_key };
+    creds.save(&credentials_file).map_err(|e| format!("Failed to save: {}", e))
+}
+
+#[tauri::command]
 fn list_audio_devices() -> Result<Vec<audio::capture::AudioDeviceInfo>, String> {
     audio::capture::AudioCapture::list_devices()
         .map_err(|e| format!("Failed to list devices: {}", e))
@@ -543,6 +562,7 @@ fn main() {
             let app_handle = app.handle();
             log::info("main", "Starting trigger polling thread (200ms)");
             thread::spawn(move || {
+                let mut last_stt_status = String::new();
                 loop {
                     // Emit trigger listener's heard texts for UI echo
                     for text in trigger::drain_heard_texts() {
@@ -554,6 +574,25 @@ fn main() {
                     if !trigger::is_paused() {
                         let vol = trigger::latest_trigger_volume();
                         let _ = app_handle.emit_all("volume-update", vol);
+                    }
+
+                    // Emit STT status when it changes
+                    let stt_status = trigger::stt_status();
+                    if stt_status != last_stt_status {
+                        last_stt_status = stt_status.clone();
+                        let _ = app_handle.emit_all("trigger-stt-status", &stt_status);
+                        log::info("trigger", &format!("STT status changed: {}", stt_status));
+                    }
+
+                    // Auto-restart trigger listener if it died and STT is configured
+                    if !trigger::is_active() && trigger::can_restart() {
+                        let cfg = CURRENT_CONFIG.lock().unwrap().clone();
+                        if let Some(ref c) = cfg {
+                            if !c.local_stt_url.is_empty() {
+                                log::warn("trigger", "Listener died, attempting restart");
+                                trigger::start_trigger_listener(Arc::new(c.clone()));
+                            }
+                        }
                     }
 
                     if trigger::is_trigger_detected() {
@@ -595,6 +634,8 @@ fn main() {
             get_config,
             save_config,
             reset_config,
+            get_tencent_credentials,
+            save_tencent_credentials,
             list_audio_devices,
             start_recording,
             stop_recording,

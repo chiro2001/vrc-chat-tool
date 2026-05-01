@@ -61,6 +61,9 @@ function App() {
   // Trigger listener echo
   const [triggerHeardText, setTriggerHeardText] = useState("");
 
+  // STT connection status
+  const [sttStatus, setSttStatus] = useState<string>("starting");
+
   // Config
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [config, setConfig] = useState<AppConfig>({
@@ -77,6 +80,13 @@ function App() {
     local_stt_url: "ws://192.168.101.7:8765",
     global_hotkey_enabled: true,
   });
+
+  // Credential form state
+  const [credsExist, setCredsExist] = useState(false);
+  const [credAppId, setCredAppId] = useState("");
+  const [credSecretId, setCredSecretId] = useState("");
+  const [credSecretKey, setCredSecretKey] = useState("");
+  const [credSaveMsg, setCredSaveMsg] = useState("");
 
   // Load config on mount
   useEffect(() => {
@@ -151,6 +161,10 @@ function App() {
       setTriggerHeardText(event.payload);
     }).then((fn) => unlisteners.push(fn));
 
+    listen<string>("trigger-stt-status", (event) => {
+      setSttStatus(event.payload);
+    }).then((fn) => unlisteners.push(fn));
+
     return () => {
       unlisteners.forEach((fn) => fn());
     };
@@ -174,6 +188,24 @@ function App() {
       logUnlisteners.forEach((fn) => fn());
     };
   }, []);
+
+  // Load credentials when config modal opens
+  useEffect(() => {
+    if (showConfigModal) {
+      invoke("get_tencent_credentials")
+        .then(() => {
+          setCredsExist(true);
+          setCredSaveMsg("");
+        })
+        .catch(() => {
+          setCredsExist(false);
+          setCredSaveMsg("loadError");
+        });
+      setCredAppId("");
+      setCredSecretId("");
+      setCredSecretKey("");
+    }
+  }, [showConfigModal]);
 
   // Toggle recording
   const toggleRecording = useCallback(() => {
@@ -247,6 +279,42 @@ function App() {
   const clearHistory = useCallback(() => {
     invoke("clear_recognition_history").then(() => setRecognitionHistory([])).catch(console.error);
   }, []);
+
+  // Save Tencent Cloud credentials
+  const saveCredentials = useCallback(async () => {
+    try {
+      await invoke("save_tencent_credentials", {
+        appId: credAppId,
+        secretId: credSecretId,
+        secretKey: credSecretKey,
+      });
+      setCredsExist(true);
+      setCredSaveMsg("saved");
+      setCredAppId("");
+      setCredSecretId("");
+      setCredSecretKey("");
+    } catch (e) {
+      setCredSaveMsg("error");
+      console.error("Failed to save credentials:", e);
+    }
+  }, [credAppId, credSecretId, credSecretKey]);
+
+  // STT status helpers
+  const getSttStatusClass = (status: string): string => {
+    if (status.startsWith("error")) return "error";
+    if (status === "disconnected") return "disconnected";
+    if (status === "connected") return "connected";
+    if (status === "connecting") return "connecting";
+    return "unknown";
+  };
+
+  const getSttStatusText = (status: string): string => {
+    if (status.startsWith("error")) return t("stt.error");
+    if (status === "disconnected") return t("stt.disconnected");
+    if (status === "connected") return t("stt.connected");
+    if (status === "connecting") return t("stt.connecting");
+    return "";
+  };
 
   // Auto-scroll history list when new entries arrive
   useEffect(() => {
@@ -324,6 +392,11 @@ function App() {
           <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
             {t("config.title")}
           </button>
+        </div>
+
+        <div className="stt-status">
+          <span className={`stt-dot stt-${getSttStatusClass(sttStatus)}`} />
+          <span className="stt-text">{getSttStatusText(sttStatus)}</span>
         </div>
 
       </section>
@@ -468,6 +541,27 @@ function App() {
                   <input type="text" value={config.tencent_credentials_file} onChange={(e) => updateConfig("tencent_credentials_file", e.target.value)} />
                 </div>
               )}
+
+              <h3>{t("config.tencentCredentials")}</h3>
+              {credSaveMsg === "loadError" && <p className="cred-status-msg error" style={{ margin: "0 0 0.5rem 0" }}>{t("config.tencentCredentialsLoadFailed")}</p>}
+              <div className="config-field">
+                <label>{t("config.tencentAppId")}</label>
+                <input type="password" placeholder={credsExist ? "••••••••" : t("config.placeholder.credentials")} value={credAppId} onChange={(e) => setCredAppId(e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.tencentSecretId")}</label>
+                <input type="password" placeholder={credsExist ? "••••••••" : t("config.placeholder.credentials")} value={credSecretId} onChange={(e) => setCredSecretId(e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.tencentSecretKey")}</label>
+                <input type="password" placeholder={credsExist ? "••••••••" : t("config.placeholder.credentials")} value={credSecretKey} onChange={(e) => setCredSecretKey(e.target.value)} />
+              </div>
+              <div className="config-field" style={{ flexDirection: "row", alignItems: "center", gap: "0.75rem" }}>
+                <button className="save-button" onClick={saveCredentials}>{t("config.save")}</button>
+                {credSaveMsg === "saved" && <span className="cred-status-msg saved">{t("config.tencentCredentialsSaved")}</span>}
+                {credSaveMsg === "error" && <span className="cred-status-msg error">{t("config.tencentCredentialsSaveFailed")}</span>}
+              </div>
+
               <h3>{t("config.osc")}</h3>
               <div className="config-field">
                 <label>{t("config.host")}</label>

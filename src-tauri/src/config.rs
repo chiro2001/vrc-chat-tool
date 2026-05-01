@@ -136,7 +136,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            tencent_credentials_file: ".tencent_credentials.yaml".to_string(),
+            tencent_credentials_file: "tencent_credentials.yaml".to_string(),
             osc_host: "127.0.0.1".to_string(),
             osc_port: 9000,
             osc_line_count: 2,
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn test_appconfig_default() {
         let cfg = AppConfig::default();
-        assert_eq!(cfg.tencent_credentials_file, ".tencent_credentials.yaml");
+        assert_eq!(cfg.tencent_credentials_file, "tencent_credentials.yaml");
         assert_eq!(cfg.osc_host, "127.0.0.1");
         assert_eq!(cfg.osc_port, 9000);
     }

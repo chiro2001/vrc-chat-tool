@@ -13,6 +13,13 @@ static LAST_TRIGGER_TEXT: Mutex<String> = Mutex::new(String::new());
 static TRIGGER_PAUSED: AtomicBool = AtomicBool::new(false);
 static TRIGGER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+/// STT connection status for UI display.
+/// Values: "starting", "connecting", "connected", "error: <reason>", "disconnected"
+static TRIGGER_STT_STATUS: Mutex<String> = Mutex::new(String::new());
+
+/// Timestamp of last restart attempt (to avoid tight restart loops).
+static LAST_RESTART_ATTEMPT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
 /// Capture stop signal (set externally to stop the trigger listener's audio stream).
 static CAPTURE_STOP: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
@@ -98,6 +105,28 @@ pub fn stop_capture() {
     }
 }
 
+/// Get current STT connection status (for UI display).
+pub fn stt_status() -> String {
+    TRIGGER_STT_STATUS.lock().unwrap().clone()
+}
+
+/// Check whether enough time has passed since the last restart attempt.
+/// Returns true if restart is allowed, false if we should wait longer.
+pub fn can_restart() -> bool {
+    let now = std::time::Instant::now();
+    let mut last = LAST_RESTART_ATTEMPT.lock().unwrap();
+    match *last {
+        Some(prev) => {
+            if now.duration_since(prev).as_secs() < 5 {
+                return false;
+            }
+        }
+        None => {}
+    }
+    *last = Some(now);
+    true
+}
+
 /// Set stop detected from main recording pipeline (stop phrase detected in ASR output).
 pub fn set_stop_detected() {
     TRIGGER_DETECTED.store(true, Ordering::SeqCst);
@@ -125,6 +154,7 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
     thread::spawn(move || {
         crate::log::info("trigger", "Starting always-on listener...");
+        *TRIGGER_STT_STATUS.lock().unwrap() = "connecting".to_string();
 
         // Find an input device
         let capture = match AudioCapture::new() {
@@ -199,10 +229,13 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
             let ws = match tokio_tungstenite::connect_async(&url).await {
                 Ok((ws, _)) => {
                     crate::log::info("trigger", "Connected to local STT");
+                    *TRIGGER_STT_STATUS.lock().unwrap() = "connected".to_string();
                     ws
                 }
                 Err(e) => {
-                    crate::log::error("trigger", &format!("Failed to connect to local STT: {}", e));
+                    let msg = format!("Failed to connect to local STT: {}", e);
+                    crate::log::error("trigger", &msg);
+                    *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
                     return;
                 }
             };
@@ -267,16 +300,22 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                             }
                             Some(Ok(Message::Close(_))) => {
                                 crate::log::warn("trigger", "STT server closed connection");
+                                *TRIGGER_STT_STATUS.lock().unwrap() = "disconnected".to_string();
                                 break;
                             }
                             Some(Ok(_)) => {
                                 // Binary, Ping, Pong — ignore
                             }
                             Some(Err(e)) => {
-                                crate::log::error("trigger", &format!("STT WebSocket error: {}", e));
+                                let msg = format!("STT WebSocket error: {}", e);
+                                crate::log::error("trigger", &msg);
+                                *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
                                 break;
                             }
-                            None => break,
+                            None => {
+                                *TRIGGER_STT_STATUS.lock().unwrap() = "disconnected".to_string();
+                                break;
+                            }
                         }
                     }
                 }

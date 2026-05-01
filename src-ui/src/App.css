@@ -823,3 +823,73 @@ h2 {
   display: flex;
   gap: 0.5rem;
 }
+
+/* ---- STT Status Indicator ---- */
+.stt-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stt-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.stt-dot.stt-connected {
+  background: #4caf50;
+  box-shadow: 0 0 4px rgba(76, 175, 80, 0.6);
+}
+
+.stt-dot.stt-connecting {
+  background: #ff9800;
+  box-shadow: 0 0 4px rgba(255, 152, 0, 0.6);
+}
+
+.stt-dot.stt-error,
+.stt-dot.stt-disconnected {
+  background: #f44336;
+  box-shadow: 0 0 4px rgba(244, 67, 54, 0.6);
+}
+
+.stt-dot.stt-unknown {
+  background: #666;
+}
+
+.stt-text {
+  font-size: 0.8rem;
+  color: #b0b0b0;
+}
+
+/* ---- Save Button ---- */
+.save-button {
+  padding: 0.5rem 1rem;
+  background: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.save-button:hover {
+  background: #1976d2;
+}
+
+/* ---- Credential Status Message ---- */
+.cred-status-msg {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.cred-status-msg.saved {
+  color: #66bb6a;
+}
+
+.cred-status-msg.error {
+  color: #ef5350;
+}
