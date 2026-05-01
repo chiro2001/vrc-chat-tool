@@ -80,7 +80,7 @@ function App() {
     asr_provider: "tencent",
     local_stt_url: "ws://192.168.101.7:8765",
     global_hotkey_enabled: true,
-    trigger_listener_enabled: true,
+    trigger_listener_enabled: false,
   });
 
   // Credential form state

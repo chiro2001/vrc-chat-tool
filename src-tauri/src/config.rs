@@ -146,7 +146,7 @@ impl Default for AppConfig {
             asr_provider: "tencent".to_string(),
             local_stt_url: "ws://192.168.101.7:8765".to_string(),
             osc_enabled: true,
-            trigger_listener_enabled: true,
+            trigger_listener_enabled: false,
             trigger_start: "开始语音识别".to_string(),
             trigger_stop: "结束语音识别".to_string(),
             global_hotkey_enabled: true,
