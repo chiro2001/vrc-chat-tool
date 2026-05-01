@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { t, useI18n } from "./i18n";
@@ -29,7 +29,6 @@ function App() {
   const [apiState, setApiState] = useState<ApiState>("idle");
   const [lastResult, setLastResult] = useState("");
   const [currentPartial, setCurrentPartial] = useState("");
-  const [sentences, setSentences] = useState<string[]>([]);
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
 
@@ -49,6 +48,7 @@ function App() {
   const [historyPage, setHistoryPage] = useState(1);
   const [historyPageSize] = useState(10);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const historyListRef = useRef<HTMLDivElement>(null);
 
   // Audio devices
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
@@ -100,7 +100,6 @@ function App() {
       setApiState("recording");
       setCurrentPartial("");
       setLastResult("");
-      setSentences([]);
       setLastError("");
     }).then((fn) => unlisteners.push(fn));
 
@@ -109,8 +108,8 @@ function App() {
       setCurrentPartial(event.payload);
     }).then((fn) => unlisteners.push(fn));
 
-    listen<string>("recording-sentence", (event) => {
-      setSentences(prev => [...prev, event.payload]);
+    listen<string>("recording-sentence", () => {
+      loadHistory();
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-complete", (event) => {
@@ -222,6 +221,13 @@ function App() {
     invoke("clear_recognition_history").then(() => setRecognitionHistory([])).catch(console.error);
   }, []);
 
+  // Auto-scroll history list when new entries arrive
+  useEffect(() => {
+    if (historyListRef.current) {
+      historyListRef.current.scrollTop = historyListRef.current.scrollHeight;
+    }
+  }, [recognitionHistory]);
+
   const isRecording = apiState === "recording" || apiState === "recognizing";
 
   return (
@@ -304,13 +310,6 @@ function App() {
             <span className="text">{currentPartial}</span>
           </div>
         )}
-        {sentences.length > 0 && (
-          <div className="sentences-list">
-            {sentences.map((s, i) => (
-              <div key={i} className="sentence-item">{s}</div>
-            ))}
-          </div>
-        )}
         {lastError && (
           <div className="error-result">
             <span className="label">{t("results.error")}</span>
@@ -326,7 +325,7 @@ function App() {
           <p className="history-empty">{t("history.empty")}</p>
         ) : (
           <>
-            <div className="history-list">
+            <div className="history-list" ref={historyListRef}>
               {recognitionHistory
                 .slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
                 .map((entry: any) => (

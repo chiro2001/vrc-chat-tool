@@ -144,12 +144,12 @@ header h1 {
 }
 
 .volume-bar {
-  width: 120px;
+  flex: 1;
+  min-width: 60px;
   height: 8px;
   background: #444;
   border-radius: 4px;
   overflow: hidden;
-  flex-shrink: 0;
 }
 
 .volume-fill {
@@ -163,6 +163,7 @@ header h1 {
   font-size: 0.8rem;
   color: #b0b0b0;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ---- Record Button ---- */
