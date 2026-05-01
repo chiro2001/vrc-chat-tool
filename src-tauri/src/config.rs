@@ -144,8 +144,8 @@ impl Default for AppConfig {
             asr_provider: "tencent".to_string(),
             local_stt_url: "ws://192.168.101.7:8765".to_string(),
             osc_enabled: true,
-            trigger_start: "开始录音".to_string(),
-            trigger_stop: "停止录音".to_string(),
+            trigger_start: "开始语音识别".to_string(),
+            trigger_stop: "结束语音识别".to_string(),
         }
     }
 }
