@@ -736,3 +736,9 @@ h2 {
   font-size: 0.85rem;
 }
 .test-modal-trigger:hover { background: #555; color: #ccc; }
+
+/* Action buttons (test + settings) */
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}

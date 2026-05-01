@@ -224,7 +224,7 @@ function App() {
   // Auto-scroll history list when new entries arrive
   useEffect(() => {
     if (historyListRef.current) {
-      historyListRef.current.scrollTop = historyListRef.current.scrollHeight;
+      historyListRef.current.scrollTop = 0;
     }
   }, [recognitionHistory]);
 
@@ -284,12 +284,14 @@ function App() {
           </span>
         </div>
 
-        <button className="test-modal-trigger" onClick={() => setShowTestModal(true)}>
-          {t("test.title")}
-        </button>
-        <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
-          {t("config.title")}
-        </button>
+        <div className="action-buttons">
+          <button className="test-modal-trigger" onClick={() => setShowTestModal(true)}>
+            {t("test.title")}
+          </button>
+          <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
+            {t("config.title")}
+          </button>
+        </div>
 
       </section>
 
@@ -332,8 +334,7 @@ function App() {
                   <div key={entry.id} className="history-entry">
                     <span className="history-time">{entry.timestamp}</span>
                     <span className="history-text">{entry.text}</span>
-                    <span className="history-source">{entry.source}</span>
-                  </div>
+                </div>
                 ))}
             </div>
             <div className="history-pagination">
