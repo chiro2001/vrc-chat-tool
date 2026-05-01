@@ -11,6 +11,28 @@ use crate::audio::capture::AudioCapture;
 static TRIGGER_DETECTED: AtomicBool = AtomicBool::new(false);
 static LAST_TRIGGER_TEXT: Mutex<String> = Mutex::new(String::new());
 
+/// Strip common Chinese and ASCII punctuation from text for matching.
+/// Preserves alphanumeric characters and whitespace.
+pub fn strip_punctuation(s: &str) -> String {
+    s.chars()
+        .filter(|c| {
+            !c.is_ascii_punctuation()
+                && !matches!(c,
+                    '，' | '。' | '、' | '；' | '：' | '？' | '！' | '“' | '”' | '‘' | '’'
+                    | '「' | '」' | '【' | '】' | '（' | '）' | '《' | '》' | '…'
+                    | '·' | '～' | '〈' | '〉' | '｛' | '｝'
+                )
+        })
+        .collect()
+}
+
+/// Check if text contains a trigger phrase, ignoring punctuation.
+pub fn matches_trigger(text: &str, phrase: &str) -> bool {
+    let clean_text = strip_punctuation(text);
+    let clean_phrase = strip_punctuation(phrase);
+    clean_text.contains(&clean_phrase)
+}
+
 pub fn is_trigger_detected() -> bool {
     TRIGGER_DETECTED.swap(false, Ordering::SeqCst)
 }
@@ -106,11 +128,12 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                                         let trimmed = t.trim();
                                         if trimmed.is_empty() { continue; }
 
-                                        // Check trigger phrases
-                                        if trimmed.contains(&start_phrase) {
+                                        // Check trigger phrases (punctuation-tolerant)
+                                        if matches_trigger(trimmed, &start_phrase) {
                                             eprintln!("[Trigger] START detected: '{}'", trimmed);
                                             TRIGGER_DETECTED.store(true, Ordering::SeqCst);
-                                        } else if trimmed.contains(&stop_phrase) {
+                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "start".to_string();
+                                        } else if matches_trigger(trimmed, &stop_phrase) {
                                             eprintln!("[Trigger] STOP detected: '{}'", trimmed);
                                             TRIGGER_DETECTED.store(true, Ordering::SeqCst);
                                             *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
@@ -127,4 +150,59 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
         stop_signal.store(true, Ordering::SeqCst);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_punctuation_ascii() {
+        assert_eq!(strip_punctuation("hello, world!"), "hello world");
+        assert_eq!(strip_punctuation("no-punctuation"), "nopunctuation");
+        assert_eq!(strip_punctuation("abc123"), "abc123");
+    }
+
+    #[test]
+    fn test_strip_punctuation_chinese() {
+        assert_eq!(strip_punctuation("开始，语音识别"), "开始语音识别");
+        assert_eq!(strip_punctuation("结束。语音识别"), "结束语音识别");
+        assert_eq!(strip_punctuation("开始、语音识别！"), "开始语音识别");
+        assert_eq!(strip_punctuation("今天天气怎么样"), "今天天气怎么样");
+    }
+
+    #[test]
+    fn test_strip_punctuation_mixed() {
+        assert_eq!(strip_punctuation("「开始」语音识别……"), "开始语音识别");
+        assert_eq!(strip_punctuation("《结束》语音识别？"), "结束语音识别");
+    }
+
+    #[test]
+    fn test_strip_punctuation_empty() {
+        assert_eq!(strip_punctuation(""), "");
+        assert_eq!(strip_punctuation("。。。"), "");
+    }
+
+    #[test]
+    fn test_matches_trigger_exact() {
+        assert!(matches_trigger("开始语音识别", "开始语音识别"));
+        assert!(matches_trigger("结束语音识别", "结束语音识别"));
+        assert!(!matches_trigger("今天天气怎么样", "开始语音识别"));
+    }
+
+    #[test]
+    fn test_matches_trigger_with_punctuation() {
+        assert!(matches_trigger("开始，语音识别", "开始语音识别"));
+        assert!(matches_trigger("开始。语音识别", "开始语音识别"));
+        assert!(matches_trigger("开始、语音识别！", "开始语音识别"));
+        assert!(matches_trigger("结束，语音识别", "结束语音识别"));
+        assert!(matches_trigger("麻烦，开始，语音识别一下", "开始语音识别"));
+    }
+
+    #[test]
+    fn test_matches_trigger_in_sentence() {
+        // Trigger phrase appears within a longer sentence
+        assert!(matches_trigger("请开始语音识别吧", "开始语音识别"));
+        assert!(matches_trigger("请，开始，语音识别吧", "开始语音识别"));
+    }
 }

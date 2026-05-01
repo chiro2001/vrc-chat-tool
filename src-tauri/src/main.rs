@@ -231,21 +231,29 @@ fn save_config(config: config::AppConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn reset_config() -> Result<config::AppConfig, String> {
+    let default_config = config::AppConfig::default();
+    if let Err(e) = default_config.save() {
+        return Err(format!("Failed to reset config: {}", e));
+    }
+    *CURRENT_CONFIG.lock().unwrap() = Some(default_config.clone());
+    Ok(default_config)
+}
+
+#[tauri::command]
 fn list_audio_devices() -> Result<Vec<audio::capture::AudioDeviceInfo>, String> {
     audio::capture::AudioCapture::list_devices()
         .map_err(|e| format!("Failed to list devices: {}", e))
 }
 
-#[tauri::command]
-fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result<(), String> {
-    // 1. Load config
-    let cfg = CURRENT_CONFIG
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "Config not loaded".to_string())?;
-
-    // 2. Load credentials if using Tencent Cloud
+/// Inner recording pipeline (shared between Tauri command and trigger).
+/// Spawns a background thread, returns immediately.
+fn start_recording_inner(
+    app: tauri::AppHandle,
+    device_index: Option<usize>,
+    cfg: &config::AppConfig,
+) -> Result<(), String> {
+    // Load credentials if using Tencent Cloud
     let tencent_creds = if cfg.asr_provider == "tencent" {
         let creds = config::TencentCredentials::load(&cfg.tencent_credentials_file);
         if creds.app_id.is_empty() || creds.secret_id.is_empty() || creds.secret_key.is_empty() {
@@ -258,7 +266,7 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
 
     SHOULD_STOP.store(false, Ordering::SeqCst);
 
-    // 3. Spawn background thread for the recording pipeline
+    let cfg = cfg.clone();
     thread::spawn(move || {
         emit_log(&app, "info", "recorder", "Recording started");
         let result: Result<String, anyhow::Error> = (|| -> anyhow::Result<String> {
@@ -383,6 +391,8 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             if osc_enabled {
                 let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
                 osc.send_typing(false)?;
+                // Clear the chatbox display after stopping
+                osc.clear_chatbox()?;
             }
 
             Ok(recognized_text)
@@ -401,6 +411,17 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
     });
 
     Ok(())
+}
+
+#[tauri::command]
+fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result<(), String> {
+    let cfg = CURRENT_CONFIG
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Config not loaded".to_string())?;
+
+    start_recording_inner(app, device_index, &cfg)
 }
 
 #[tauri::command]
@@ -442,14 +463,46 @@ fn main() {
     *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
 
     // Start always-on trigger listener (local STT for voice commands)
-    if config.asr_provider == "local" && !config.local_stt_url.is_empty() {
+    // Always start if local_stt_url is configured, regardless of asr_provider
+    if !config.local_stt_url.is_empty() {
         trigger::start_trigger_listener(Arc::new(config.clone()));
     }
 
     tauri::Builder::default()
+        .setup(|app| {
+            // Poll trigger detection in a background thread
+            let app_handle = app.handle();
+            thread::spawn(move || {
+                loop {
+                    if trigger::is_trigger_detected() {
+                        let text = trigger::last_trigger_text();
+                        eprintln!("[Trigger] Action: {}", text);
+                        match text.as_str() {
+                            "stop" => {
+                                SHOULD_STOP.store(true, Ordering::SeqCst);
+                            }
+                            _ => {
+                                // start: invoke the command directly
+                                let cfg = CURRENT_CONFIG.lock().unwrap().clone();
+                                if let Some(cfg) = cfg {
+                                    let _ = start_recording_inner(
+                                        app_handle.clone(),
+                                        None,
+                                        &cfg,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    thread::sleep(std::time::Duration::from_millis(200));
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
+            reset_config,
             list_audio_devices,
             start_recording,
             stop_recording,

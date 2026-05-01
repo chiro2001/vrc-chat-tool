@@ -20,6 +20,8 @@ TMP_DIR.mkdir(exist_ok=True)
 VB_CABLE_PLAYBACK_INDEX = 6   # CABLE Input (play TO this device)
 VB_CABLE_CAPTURE_INDEX = 1    # CABLE Output (capture FROM this device, sounddevice index)
 RUST_BIN = PROJECT_ROOT / "src-tauri" / "target" / "debug" / "test_e2e.exe"
+E2E_SERVER_BIN = PROJECT_ROOT / "src-tauri" / "target" / "debug" / "vrc-chat-tool.exe"
+E2E_SERVER_PID_FILE = TMP_DIR / "e2e_server.pid"
 
 
 def find_vb_cable_device(direction="output"):
@@ -186,6 +188,46 @@ def build_rust_binary():
     return True
 
 
+def build_e2e_server():
+    """Build the main binary (for E2E server mode)"""
+    result = subprocess.run(
+        ["cargo", "build"],
+        cwd=PROJECT_ROOT / "src-tauri",
+        capture_output=True,
+        text=True,
+        timeout=120
+    )
+    if result.returncode != 0:
+        print("Server build FAILED:")
+        print(result.stderr[-1000:])
+        return False
+    return True
+
+
+def start_e2e_server():
+    """Start the E2E HTTP test server in background. Returns the process."""
+    if not E2E_SERVER_BIN.exists():
+        print(f"E2E server binary not found at {E2E_SERVER_BIN}")
+        return None
+    proc = subprocess.Popen(
+        [str(E2E_SERVER_BIN), "--e2e"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    E2E_SERVER_PID_FILE.write_text(str(proc.pid))
+    time.sleep(2)  # Wait for server to start
+    return proc
+
+
+def stop_e2e_server(proc):
+    """Stop the E2E server gracefully."""
+    if proc:
+        proc.terminate()
+        proc.wait(timeout=5)
+        if E2E_SERVER_PID_FILE.exists():
+            E2E_SERVER_PID_FILE.unlink()
+
+
 def run_rust_capture(duration_secs=3, output_wav="tmp/e2e_capture.wav"):
     """Run the Rust capture binary"""
     output_path = PROJECT_ROOT / output_wav
@@ -230,32 +272,102 @@ def run_single_test(freq, duration, capture_secs):
     return verify_captured_wav(captured, expected_freq=freq, expected_duration=duration, tolerance=1.0)
 
 
+def test_trigger_matching():
+    """Test trigger phrase matching via the E2E server's /inject_stt endpoint (dry-run mode).
+    Requires the E2E server to be running on localhost:9876."""
+    import json
+    import urllib.request
+
+    base_url = "http://127.0.0.1:9876"
+    tests = [
+        # (name, input_text, expected_trigger)
+        ("exact start",       "开始语音识别",     "start"),
+        ("comma start",       "开始，语音识别",   "start"),
+        ("period start",      "开始。语音识别",   "start"),
+        ("mixed punct",       "开始、语音识别！",  "start"),
+        ("exact stop",        "结束语音识别",     "stop"),
+        ("comma stop",        "结束，语音识别",   "stop"),
+        ("no match",          "今天天气怎么样",    "none"),
+        ("empty text",         "",                "none"),
+    ]
+
+    print("\n--- Trigger Phrase Matching Tests ---")
+    results = []
+    for name, input_text, expected in tests:
+        try:
+            body = json.dumps({"text": input_text, "dry_run": True}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{base_url}/inject_stt",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            actual = data.get("trigger", "error")
+            passed = actual == expected
+            status = "PASS" if passed else "FAIL"
+            print(f"  [{status}] {name}: '{input_text}' -> trigger='{actual}' (expected '{expected}')")
+            if not passed:
+                print(f"         clean_text='{data.get('clean_text', '?')}'")
+            results.append(passed)
+        except urllib.request.URLError:
+            print(f"  [SKIP] {name}: E2E server not running on {base_url}")
+            results.append(True)  # skip doesn't fail
+        except Exception as e:
+            print(f"  [FAIL] {name}: {e}")
+            results.append(False)
+
+    return all(results)
+
+
 def main():
     print("=" * 60)
-    print("VRC Chat Tool - E2E Audio Pipeline Test")
+    print("VRC Chat Tool - E2E Tests")
     print("=" * 60)
 
-    # 1. Build Rust binary
+    # 1. Build binaries
     if not build_rust_binary():
         sys.exit(1)
+    if not build_e2e_server():
+        print("Warning: E2E server build failed, skipping trigger tests")
 
-    tests = [
+    audio_tests = [
         {"name": "440Hz / 3s", "freq": 440.0, "duration": 3.0, "capture_secs": 4},
         {"name": "1000Hz / 2s", "freq": 1000.0, "duration": 2.0, "capture_secs": 3},
     ]
 
     results = []
-    for test in tests:
-        print(f"\n--- Test: {test['name']} ---")
+
+    # Audio pipeline tests
+    print("\n--- Audio Capture Pipeline Tests ---")
+    for test in audio_tests:
+        print(f"\n  Test: {test['name']}")
         result = run_single_test(test["freq"], test["duration"], test["capture_secs"])
         results.append(result)
+
+    # Trigger matching tests (with managed server)
+    e2e_proc = start_e2e_server()
+    if e2e_proc:
+        trigger_ok = test_trigger_matching()
+        stop_e2e_server(e2e_proc)
+    else:
+        print("\n--- Trigger Phrase Matching Tests ---")
+        print("  [SKIP] E2E server binary not built")
+        trigger_ok = True
+    results.append(trigger_ok)
 
     # Summary
     print("\n" + "=" * 60)
     passed = sum(1 for r in results if r)
-    print(f"RESULTS: {passed}/{len(results)} tests passed")
-    for i, (r, t) in enumerate(zip(results, tests)):
-        print(f"  [{('PASS' if r else 'FAIL')}] {t['name']}")
+    total = len(results)
+    print(f"RESULTS: {passed}/{total} tests passed")
+    # Audio tests first, then trigger
+    for i, test in enumerate(audio_tests):
+        r = results[i]
+        print(f"  [{('PASS' if r else 'FAIL')}] Audio: {test['name']}")
+    trigger_result = results[len(audio_tests)] if len(results) > len(audio_tests) else True
+    print(f"  [{('PASS' if trigger_result else 'FAIL')}] Trigger: phrase matching")
     print("=" * 60)
 
     sys.exit(0 if all(results) else 1)

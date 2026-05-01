@@ -7,6 +7,7 @@ use vrc_chat_tool::audio::capture::AudioCapture;
 use vrc_chat_tool::config::AppConfig;
 use vrc_chat_tool::osc::sender::OscSender;
 use vrc_chat_tool::speech::streaming::StreamingRecognizer;
+use vrc_chat_tool::trigger;
 
 static SHOULD_STOP_E2E: AtomicBool = AtomicBool::new(false);
 
@@ -21,7 +22,7 @@ pub fn run_e2e_server() -> Result<(), Box<dyn std::error::Error>> {
     let is_recording = Arc::new(AtomicBool::new(false));
     let config = AppConfig::load()?;
 
-    for request in server.incoming_requests() {
+    for mut request in server.incoming_requests() {
         let url = request.url().to_string();
         let method = request.method().clone();
 
@@ -101,6 +102,70 @@ pub fn run_e2e_server() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 let response = Response::from_string(json).with_header(cors_header);
                 let _ = request.respond(response);
+            }
+
+            (Method::Post, "/inject_stt") => {
+                // Parse JSON body for trigger phrase injection testing
+                let mut body = String::new();
+                request.as_reader().read_to_string(&mut body).ok();
+                let parsed: serde_json::Value = serde_json::from_str(&body)
+                    .unwrap_or(serde_json::json!({"text": ""}));
+                let text = parsed.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let dry_run = parsed.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                let start_phrase = trigger::strip_punctuation(&config.trigger_start);
+                let stop_phrase = trigger::strip_punctuation(&config.trigger_stop);
+                let clean_text = trigger::strip_punctuation(text);
+
+                let trigger_matched = if clean_text.contains(&start_phrase) {
+                    Some("start")
+                } else if clean_text.contains(&stop_phrase) {
+                    Some("stop")
+                } else {
+                    None
+                };
+
+                let trigger_id = trigger_matched.unwrap_or("none");
+
+                let response = if dry_run {
+                    // Dry-run: only check matching, don't start recording
+                    serde_json::json!({
+                        "status": "ok",
+                        "trigger": trigger_id,
+                        "input_text": text,
+                        "clean_text": clean_text,
+                    }).to_string()
+                } else {
+                    match trigger_matched {
+                        Some("start") => {
+                            if is_recording.load(Ordering::SeqCst) {
+                                r#"{"status":"ok","trigger":"start","action":"already_recording"}"#.to_string()
+                            } else {
+                                // Trigger a recording
+                                let cfg = config.clone();
+                                let result_clone = last_result.clone();
+                                let is_rec_clone = is_recording.clone();
+                                SHOULD_STOP_E2E.store(false, Ordering::SeqCst);
+                                is_rec_clone.store(true, Ordering::SeqCst);
+                                thread::spawn(move || {
+                                    let result = run_recording_pipeline(&cfg);
+                                    match result {
+                                        Ok(text) => *result_clone.lock().unwrap() = text,
+                                        Err(e) => *result_clone.lock().unwrap() = format!("ERROR: {}", e),
+                                    }
+                                    is_rec_clone.store(false, Ordering::SeqCst);
+                                });
+                                r#"{"status":"ok","trigger":"start","action":"recording_started"}"#.to_string()
+                            }
+                        }
+                        Some("stop") => {
+                            SHOULD_STOP_E2E.store(true, Ordering::SeqCst);
+                            r#"{"status":"ok","trigger":"stop","action":"stop_signal_sent"}"#.to_string()
+                        }
+                        _ => { r#"{"status":"ok","trigger":"none"}"#.to_string() }
+                    }
+                };
+                let _ = request.respond(Response::from_string(response).with_header(cors_header));
             }
 
             _ => {
@@ -194,6 +259,7 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
     let _ = osc.send_typing(true);
     let _ = osc.send_chatbox(&recognized_text);
     let _ = osc.send_typing(false);
+    let _ = osc.clear_chatbox();
 
     eprintln!("[E2E] Recognition result: {}", recognized_text);
     Ok(recognized_text)

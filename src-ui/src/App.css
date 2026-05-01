@@ -330,6 +330,71 @@ header h1 {
   border-bottom: 1px solid #444;
 }
 
+.config-reset-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #444;
+  text-align: center;
+}
+
+.confirm-reset {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  color: #ff6b6b;
+  font-size: 0.9rem;
+}
+
+.confirm-reset-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.reset-button {
+  background: #5a3a3a;
+  color: #ff8a8a;
+  border: 1px solid #7a4a4a;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s;
+}
+
+.reset-button:hover {
+  background: #6a4a4a;
+}
+
+.danger-button {
+  background: #c0392b;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.danger-button:hover {
+  background: #e74c3c;
+}
+
+.cancel-button {
+  background: #444;
+  color: #ccc;
+  border: 1px solid #666;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.cancel-button:hover {
+  background: #555;
+}
+
 /* ---- History Panel ---- */
 .history-panel {
   background: #2a2a2a;

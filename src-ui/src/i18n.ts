@@ -66,6 +66,10 @@ const translations: Record<Lang, Record<string, string>> = {
     "history.confirmClear": "确认清除所有历史记录?",
     "history.yes": "确认",
     "history.no": "取消",
+    "config.reset": "恢复默认设置",
+    "config.confirmReset": "确认恢复所有设置为默认值？",
+    "config.resetYes": "确认恢复",
+    "config.resetNo": "取消",
   },
   en: {
     "app.title": "VRC Voice OSC",
@@ -124,6 +128,10 @@ const translations: Record<Lang, Record<string, string>> = {
     "history.confirmClear": "Clear all history?",
     "history.yes": "Yes",
     "history.no": "No",
+    "config.reset": "Reset to Defaults",
+    "config.confirmReset": "Reset all settings to defaults?",
+    "config.resetYes": "Reset",
+    "config.resetNo": "Cancel",
   },
 };
 

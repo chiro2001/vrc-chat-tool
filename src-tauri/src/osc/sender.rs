@@ -161,4 +161,11 @@ impl OscSender {
     pub fn clear_buffer(&self) {
         self.buffer.lock().unwrap().clear();
     }
+
+    /// Clear the VRChat chatbox: clears internal buffer and sends a stop indicator.
+    /// VRChat ignores empty strings, so we send a brief "stopped" message instead.
+    pub fn clear_chatbox(&self) -> anyhow::Result<()> {
+        self.clear_buffer();
+        self.send_osc("/chatbox/input", "语音识别已停止", true, false)
+    }
 }

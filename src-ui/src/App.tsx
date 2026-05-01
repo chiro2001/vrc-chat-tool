@@ -58,6 +58,7 @@ function App() {
   const [selectedDeviceIndex, setSelectedDeviceIndex] = useState(0);
 
   // Config
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [config, setConfig] = useState<AppConfig>({
     tencent_credentials_file: ".tencent_credentials.yaml",
     osc_host: "127.0.0.1",
@@ -478,6 +479,30 @@ function App() {
               <div className="config-field">
                 <label>{t("config.triggerStop")}</label>
                 <input type="text" value={config.trigger_stop} onChange={(e) => updateConfig("trigger_stop", e.target.value)} />
+              </div>
+
+              <div className="config-reset-section">
+                {showResetConfirm ? (
+                  <div className="confirm-reset">
+                    <span>{t("config.confirmReset")}</span>
+                    <div className="confirm-reset-buttons">
+                      <button className="danger-button" onClick={async () => {
+                        try {
+                          const defaultConfig = await invoke<AppConfig>("reset_config");
+                          setConfig(defaultConfig);
+                        } catch (e) {
+                          console.error("Failed to reset config:", e);
+                        }
+                        setShowResetConfirm(false);
+                      }}>{t("config.resetYes")}</button>
+                      <button className="cancel-button" onClick={() => setShowResetConfirm(false)}>{t("config.resetNo")}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="reset-button" onClick={() => setShowResetConfirm(true)}>
+                    {t("config.reset")}
+                  </button>
+                )}
               </div>
             </div>
           </div>
