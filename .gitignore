@@ -26,5 +26,4 @@ __pycache__/
 streaming-stt-server/
 
 # STT server local config
-stt-config.yaml
 models/
