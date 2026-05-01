@@ -127,6 +127,8 @@ pub struct AppConfig {
     pub osc_remove_period: bool,
     pub asr_provider: String,
     pub local_stt_url: String,
+    /// Path to local embedded STT model config (Sherpa-ONNX YAML)
+    pub stt_config_path: String,
     pub osc_enabled: bool,
     pub trigger_listener_enabled: bool,
     pub trigger_start: String,
@@ -145,6 +147,7 @@ impl Default for AppConfig {
             osc_remove_period: true,
             asr_provider: "tencent".to_string(),
             local_stt_url: "ws://192.168.101.7:8765".to_string(),
+            stt_config_path: "stt-config.yaml".to_string(),
             osc_enabled: true,
             trigger_listener_enabled: false,
             trigger_start: "开始语音识别".to_string(),

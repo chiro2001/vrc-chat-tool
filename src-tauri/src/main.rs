@@ -363,10 +363,14 @@ fn start_recording_inner(
                 let _ = osc_typing.send_typing(true);
             }
 
-            // Build recognizer (Tencent Cloud or Local STT)
+            // Build recognizer (Tencent Cloud, Local STT, or Local Embedded)
             let recognizer = if cfg.asr_provider == "local" {
                 speech::recognizer::Recognizer::Local(
                     speech::local::LocalRecognizer::new(cfg.local_stt_url.clone())
+                )
+            } else if cfg.asr_provider == "local_embedded" {
+                speech::recognizer::Recognizer::LocalEmbedded(
+                    speech::local_embedded::LocalEmbeddedRecognizer::from_config_file(&cfg.stt_config_path)?
                 )
             } else {
                 let c = tencent_creds.as_ref().unwrap();

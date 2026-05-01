@@ -1,0 +1,40 @@
+[package]
+name = "stt-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "stt_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stt-server"
+path = "src/main.rs"
+
+[dependencies]
+# Core ASR
+sherpa-onnx = "1.13"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# HTTP + Archive (for model download)
+reqwest = { version = "0.12", features = ["blocking"] }
+bzip2 = "0.5"
+tar = "0.4"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling + Logging
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

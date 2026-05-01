@@ -1,10 +1,11 @@
-/// Unified streaming ASR recognizer — compatibility layer between Tencent Cloud and Local STT.
+/// Unified streaming ASR recognizer — compatibility layer between Tencent Cloud, Local WebSocket, and Local Embedded.
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 pub enum Recognizer {
     Tencent(crate::speech::streaming::StreamingRecognizer),
     Local(crate::speech::local::LocalRecognizer),
+    LocalEmbedded(crate::speech::local_embedded::LocalEmbeddedRecognizer),
 }
 
 impl Recognizer {
@@ -20,6 +21,9 @@ impl Recognizer {
                 r.recognize_pcm_stream(pcm_rx, stop_signal, 16000, on_partial, on_sentence).await
             }
             Recognizer::Local(r) => {
+                r.recognize_pcm_stream(pcm_rx, stop_signal, on_partial, on_sentence).await
+            }
+            Recognizer::LocalEmbedded(r) => {
                 r.recognize_pcm_stream(pcm_rx, stop_signal, on_partial, on_sentence).await
             }
         }

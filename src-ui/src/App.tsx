@@ -17,6 +17,7 @@ interface AppConfig {
   trigger_stop: string;
   asr_provider: string;
   local_stt_url: string;
+  stt_config_path: string;
   global_hotkey_enabled: boolean;
   trigger_listener_enabled: boolean;
 }
@@ -79,6 +80,7 @@ function App() {
     trigger_stop: "停止录音",
     asr_provider: "tencent",
     local_stt_url: "ws://192.168.101.7:8765",
+    stt_config_path: "stt-config.yaml",
     global_hotkey_enabled: true,
     trigger_listener_enabled: false,
   });
@@ -533,6 +535,7 @@ function App() {
                 <select value={config.asr_provider} onChange={(e) => updateConfig("asr_provider", e.target.value)}>
                   <option value="tencent">{t("config.providerTencent")}</option>
                   <option value="local">{t("config.providerLocal")}</option>
+                  <option value="local_embedded">{t("config.providerLocalEmbedded")}</option>
                 </select>
               </div>
 
@@ -540,6 +543,11 @@ function App() {
                 <div className="config-field">
                   <label>{t("config.localSttUrl")}</label>
                   <input type="text" value={config.local_stt_url} onChange={(e) => updateConfig("local_stt_url", e.target.value)} />
+                </div>
+              ) : config.asr_provider === "local_embedded" ? (
+                <div className="config-field">
+                  <label>{t("config.sttConfigPath")}</label>
+                  <input type="text" value={config.stt_config_path} onChange={(e) => updateConfig("stt_config_path", e.target.value)} />
                 </div>
               ) : (
                 <div className="config-field">
