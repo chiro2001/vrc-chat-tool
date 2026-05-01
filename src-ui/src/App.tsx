@@ -12,6 +12,9 @@ interface AppConfig {
   osc_line_count: number;
   osc_retention_secs: number;
   osc_remove_period: boolean;
+  osc_enabled: boolean;
+  trigger_start: string;
+  trigger_stop: string;
   asr_provider: string;
   local_stt_url: string;
 }
@@ -62,6 +65,9 @@ function App() {
     osc_line_count: 2,
     osc_retention_secs: 5,
     osc_remove_period: true,
+    osc_enabled: true,
+    trigger_start: "开始录音",
+    trigger_stop: "停止录音",
     asr_provider: "tencent",
     local_stt_url: "ws://192.168.101.7:8765",
   });
@@ -457,6 +463,21 @@ function App() {
                   <input type="checkbox" checked={config.osc_remove_period} onChange={(e) => updateConfig("osc_remove_period", e.target.checked)} />
                   {t("config.removePeriod")}
                 </label>
+              </div>
+              <div className="config-field">
+                <label>
+                  <input type="checkbox" checked={config.osc_enabled} onChange={(e) => updateConfig("osc_enabled", e.target.checked)} />
+                  {t("config.oscEnabled")}
+                </label>
+              </div>
+              <h3>{t("config.trigger")}</h3>
+              <div className="config-field">
+                <label>{t("config.triggerStart")}</label>
+                <input type="text" value={config.trigger_start} onChange={(e) => updateConfig("trigger_start", e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.triggerStop")}</label>
+                <input type="text" value={config.trigger_stop} onChange={(e) => updateConfig("trigger_stop", e.target.value)} />
               </div>
             </div>
           </div>

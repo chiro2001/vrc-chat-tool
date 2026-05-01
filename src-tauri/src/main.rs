@@ -291,9 +291,11 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // Emit started event
             let _ = app.emit_all("recording-started", "");
 
-            // Show typing indicator in VRChat
-            let osc_typing = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
-            let _ = osc_typing.send_typing(true);
+            // Show typing indicator in VRChat (if OSC enabled)
+            if cfg.osc_enabled {
+                let osc_typing = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
+                let _ = osc_typing.send_typing(true);
+            }
 
             // Build recognizer (Tencent Cloud or Local STT)
             let recognizer = if cfg.asr_provider == "local" {
@@ -342,12 +344,17 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             emit_log(&app, "debug", "audio", "Audio capture stream opened");
 
             // Run streaming ASR via unified recognizer
+            let osc_enabled = cfg.osc_enabled;
             let recognized_text = rt.block_on(async {
                 let app_sentence = app.clone();
-                let osc_for_sentence = Arc::new(osc::sender::OscSender::with_config(
-                    cfg.osc_host.clone(), cfg.osc_port,
-                    cfg.osc_line_count, cfg.osc_retention_secs, cfg.osc_remove_period,
-                ));
+                let osc_for_sentence = if osc_enabled {
+                    Some(Arc::new(osc::sender::OscSender::with_config(
+                        cfg.osc_host.clone(), cfg.osc_port,
+                        cfg.osc_line_count, cfg.osc_retention_secs, cfg.osc_remove_period,
+                    )))
+                } else {
+                    None
+                };
                 let osc_for_partial = osc_for_sentence.clone();
                 let osc_s = osc_for_sentence.clone();
                 recognizer.recognize_pcm_stream(
@@ -355,11 +362,15 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
                     stop_signal_for_asr,
                     move |partial_text: &str| {
                         let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
-                        let _ = osc_for_partial.send_partial(partial_text);
+                        if let Some(ref osc) = osc_for_partial {
+                            let _ = osc.send_partial(partial_text);
+                        }
                     },
                     move |sentence_text: &str| {
                         let _ = app_sentence.emit_all("recording-sentence", sentence_text.to_string());
-                        let _ = osc_s.send_chatbox(sentence_text);
+                        if let Some(ref osc) = osc_s {
+                            let _ = osc.send_chatbox(sentence_text);
+                        }
                         history::add_entry(sentence_text, "asr");
                     },
                 ).await
@@ -368,9 +379,10 @@ fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result
             // Wait for capture thread to finish
             let _ = capture_thread.join();
 
-            // Final OSC: just turn off typing indicator (sentences already sent in real-time)
-            let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
-            osc.send_typing(false)?;
+            if osc_enabled {
+                let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
+                osc.send_typing(false)?;
+            }
 
             Ok(recognized_text)
         })();
