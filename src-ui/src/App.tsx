@@ -398,10 +398,12 @@ function App() {
           </button>
         </div>
 
-        <div className="stt-status">
-          <span className={`stt-dot stt-${getSttStatusClass(sttStatus)}`} />
-          <span className="stt-text">{getSttStatusText(sttStatus)}</span>
-        </div>
+        {config.trigger_listener_enabled && (
+          <div className="stt-status">
+            <span className={`stt-dot stt-${getSttStatusClass(sttStatus)}`} />
+            <span className="stt-text">{getSttStatusText(sttStatus)}</span>
+          </div>
+        )}
 
       </section>
 
