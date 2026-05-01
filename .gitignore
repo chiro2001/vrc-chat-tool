@@ -9,6 +9,7 @@ dist/
 .env
 .env.local
 .tencent_credentials.yaml
+config.yaml
 
 # Temp
 tmp/

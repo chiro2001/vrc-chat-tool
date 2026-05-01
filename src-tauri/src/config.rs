@@ -24,20 +24,35 @@ impl Default for TencentCredentials {
 impl TencentCredentials {
     pub fn load(path: &str) -> Self {
         let p = Path::new(path);
-        if !p.exists() {
-            eprintln!("Credentials file '{}' not found, using defaults", path);
-            return Self::default();
-        }
-        match fs::read_to_string(p) {
+        // Try relative path first, then exe directory
+        let resolved = if p.exists() {
+            Some(p.to_path_buf())
+        } else if let Ok(exe) = std::env::current_exe() {
+            let exe_dir = exe.parent().unwrap_or(Path::new("."));
+            let alt = exe_dir.join(path);
+            if alt.exists() { Some(alt) } else { None }
+        } else {
+            None
+        };
+
+        let p = match resolved {
+            Some(r) => r,
+            None => {
+                eprintln!("Credentials file '{}' not found, using defaults", path);
+                return Self::default();
+            }
+        };
+
+        match fs::read_to_string(&p) {
             Ok(content) => match serde_yaml::from_str(&content) {
                 Ok(creds) => creds,
                 Err(e) => {
-                    eprintln!("Failed to parse '{}': {}, using defaults", path, e);
+                    eprintln!("Failed to parse '{}': {}, using defaults", p.display(), e);
                     Self::default()
                 }
             },
             Err(e) => {
-                eprintln!("Failed to read '{}': {}, using defaults", path, e);
+                eprintln!("Failed to read '{}': {}, using defaults", p.display(), e);
                 Self::default()
             }
         }
@@ -82,11 +97,25 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn load() -> Result<Self> {
         let path = Path::new("config.yaml");
-        if !path.exists() {
-            eprintln!("config.yaml not found, using default config");
-            return Ok(Self::default());
-        }
-        let content = fs::read_to_string(path)?;
+        // Try relative path first, then exe directory
+        let resolved = if path.exists() {
+            Some(path.to_path_buf())
+        } else if let Ok(exe) = std::env::current_exe() {
+            let exe_dir = exe.parent().unwrap_or(Path::new("."));
+            let alt = exe_dir.join("config.yaml");
+            if alt.exists() { Some(alt) } else { None }
+        } else {
+            None
+        };
+
+        let path = match resolved {
+            Some(r) => r,
+            None => {
+                eprintln!("config.yaml not found, using default config");
+                return Ok(Self::default());
+            }
+        };
+        let content = fs::read_to_string(&path)?;
         match serde_yaml::from_str(&content) {
             Ok(config) => Ok(config),
             Err(e) => {
