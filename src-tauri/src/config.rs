@@ -1,7 +1,67 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use anyhow::Result;
+
+/// Search for a config file. Order:
+/// 1. Current working directory
+/// 2. Each parent directory up to root
+/// 3. Executable's directory (for production builds)
+/// 4. Executable's parent directory (for dev: target/debug → target → project root)
+fn find_config_file(name: &str) -> Option<PathBuf> {
+    // 1. CWD-relative
+    let cwd = Path::new(name);
+    if cwd.exists() {
+        eprintln!("[config] Found {} in CWD", name);
+        return Some(cwd.to_path_buf());
+    }
+
+    // 2. Search upward from CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = cwd.as_path();
+        loop {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                eprintln!("[config] Found {} in {}", name, dir.display());
+                return Some(candidate);
+            }
+            match dir.parent() {
+                Some(parent) => dir = parent,
+                None => break,
+            }
+        }
+    }
+
+    // 3. Exe directory
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let candidate = exe_dir.join(name);
+            if candidate.exists() {
+                eprintln!("[config] Found {} in exe dir: {}", name, exe_dir.display());
+                return Some(candidate);
+            }
+            // 4. Exe's parent (for target/debug → target → project dir)
+            if let Some(parent) = exe_dir.parent() {
+                let candidate = parent.join(name);
+                if candidate.exists() {
+                    eprintln!("[config] Found {} in exe parent: {}", name, parent.display());
+                    return Some(candidate);
+                }
+                // 5. Grandparent (for target/debug → target → project-dir)
+                if let Some(grandparent) = parent.parent() {
+                    let candidate = grandparent.join(name);
+                    if candidate.exists() {
+                        eprintln!("[config] Found {} in exe grandparent: {}", name, grandparent.display());
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("[config] {} not found in CWD, parents, or exe dirs", name);
+    None
+}
 
 /// Tencent Cloud credentials — stored in a SEPARATE file to avoid leaking secrets in git.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,26 +74,16 @@ pub struct TencentCredentials {
 impl Default for TencentCredentials {
     fn default() -> Self {
         Self {
-            app_id: "REDACTED_APPID".to_string(),
-            secret_id: "REDACTED_SECRET_ID".to_string(),
-            secret_key: "REDACTED_SECRET_KEY".to_string(),
+            app_id: "".to_string(),
+            secret_id: "".to_string(),
+            secret_key: "".to_string(),
         }
     }
 }
 
 impl TencentCredentials {
     pub fn load(path: &str) -> Self {
-        let p = Path::new(path);
-        // Try relative path first, then exe directory
-        let resolved = if p.exists() {
-            Some(p.to_path_buf())
-        } else if let Ok(exe) = std::env::current_exe() {
-            let exe_dir = exe.parent().unwrap_or(Path::new("."));
-            let alt = exe_dir.join(path);
-            if alt.exists() { Some(alt) } else { None }
-        } else {
-            None
-        };
+        let resolved = find_config_file(path);
 
         let p = match resolved {
             Some(r) => r,
@@ -96,30 +146,19 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        let path = Path::new("config.yaml");
-        // Try relative path first, then exe directory
-        let resolved = if path.exists() {
-            Some(path.to_path_buf())
-        } else if let Ok(exe) = std::env::current_exe() {
-            let exe_dir = exe.parent().unwrap_or(Path::new("."));
-            let alt = exe_dir.join("config.yaml");
-            if alt.exists() { Some(alt) } else { None }
-        } else {
-            None
-        };
+        let path = find_config_file("config.yaml")
+            .unwrap_or_else(|| PathBuf::from("config.yaml"));
 
-        let path = match resolved {
-            Some(r) => r,
-            None => {
+        match fs::read_to_string(&path) {
+            Ok(content) => match serde_yaml::from_str(&content) {
+                Ok(config) => Ok(config),
+                Err(e) => {
+                    eprintln!("Failed to parse {}: {}, using default config", path.display(), e);
+                    Ok(Self::default())
+                }
+            },
+            Err(_) => {
                 eprintln!("config.yaml not found, using default config");
-                return Ok(Self::default());
-            }
-        };
-        let content = fs::read_to_string(&path)?;
-        match serde_yaml::from_str(&content) {
-            Ok(config) => Ok(config),
-            Err(e) => {
-                eprintln!("Failed to parse config.yaml: {}, using default config", e);
                 Ok(Self::default())
             }
         }
@@ -127,6 +166,7 @@ impl AppConfig {
 
     pub fn save(&self) -> Result<()> {
         let content = serde_yaml::to_string(self)?;
+        // Save to CWD (same place load() searched first)
         fs::write("config.yaml", content)?;
         Ok(())
     }
@@ -142,5 +182,29 @@ mod tests {
         let yaml = serde_yaml::to_string(&creds).unwrap();
         let deserialized: TencentCredentials = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(creds.app_id, deserialized.app_id);
+    }
+
+    #[test]
+    fn test_find_config_file_cwd() {
+        // Create a temp file in CWD and verify find_config_file finds it
+        let name = "__test_find_cwd.yaml";
+        fs::write(name, "test").unwrap();
+        let found = find_config_file(name);
+        fs::remove_file(name).ok();
+        assert!(found.is_some());
+    }
+
+    #[test]
+    fn test_find_config_file_not_found() {
+        let found = find_config_file("__nonexistent_file_12345.yaml");
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_appconfig_default() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.tencent_credentials_file, ".tencent_credentials.yaml");
+        assert_eq!(cfg.osc_host, "127.0.0.1");
+        assert_eq!(cfg.osc_port, 9000);
     }
 }
