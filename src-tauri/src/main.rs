@@ -368,10 +368,17 @@ fn start_recording_inner(
                 speech::recognizer::Recognizer::Local(
                     speech::local::LocalRecognizer::new(cfg.local_stt_url.clone())
                 )
-            } else if cfg.asr_provider == "local_embedded" {
-                speech::recognizer::Recognizer::LocalEmbedded(
-                    speech::local_embedded::LocalEmbeddedRecognizer::from_config_file(&cfg.stt_config_path)?
-                )
+                } else if cfg.asr_provider == "local_embedded" {
+                    let engine_cfg = speech::local_embedded::LocalEmbeddedRecognizer::from_config_file(&cfg.stt_config_path)
+                        .map_err(|e| anyhow::anyhow!(
+                            "无法加载 STT 模型配置: {}\n\n请检查:\n\
+                             1. 文件 {} 是否存在\n\
+                             2. 模型文件是否已下载 (python scripts/download_model.py)\n\
+                             3. 设置中\"STT 模型配置路径\"是否正确",
+                            e,
+                            cfg.stt_config_path,
+                        ))?;
+                    speech::recognizer::Recognizer::LocalEmbedded(engine_cfg)
             } else {
                 let c = tencent_creds.as_ref().unwrap();
                 speech::recognizer::Recognizer::Tencent(
