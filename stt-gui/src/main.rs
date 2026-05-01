@@ -52,6 +52,47 @@ struct Args {
     test_output: String,
 }
 
+/// Try to load a Windows system font file as bytes.
+fn load_system_font(path: &str) -> Option<Vec<u8>> {
+    std::fs::read(path).ok()
+}
+
+/// Load Chinese font into egui for proper CJK character rendering.
+fn setup_chinese_font(ctx: &egui::Context) {
+    // Try common Chinese fonts on Windows, in order of preference
+    let font_paths = [
+        "C:\\Windows\\Fonts\\msyh.ttc",  // Microsoft YaHei
+        "C:\\Windows\\Fonts\\msyhbd.ttc", // Microsoft YaHei Bold
+        "C:\\Windows\\Fonts\\simhei.ttf", // SimHei
+        "C:\\Windows\\Fonts\\simsun.ttc", // SimSun
+    ];
+
+    for path in &font_paths {
+        if let Some(font_bytes) = load_system_font(path) {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "chinese".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(font_bytes)),
+            );
+            // Insert at front so it's used first for CJK characters
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "chinese".to_owned());
+            fonts
+                .families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .insert(0, "chinese".to_owned());
+            ctx.set_fonts(fonts);
+            eprintln!("[Font] Loaded: {}", path);
+            return;
+        }
+    }
+    eprintln!("[Font] No Chinese font found, CJK may render as tofu");
+}
+
 fn main() -> Result<(), eframe::Error> {
     let args = Args::parse();
 
@@ -74,7 +115,10 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "STT Service Test Tool",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            // Load Chinese font for proper CJK rendering
+            setup_chinese_font(&cc.egui_ctx);
+
             let app = if let Some(ref tc) = test_config {
                 let mut a = SttGuiApp::default();
                 a.set_test_config(tc.clone());

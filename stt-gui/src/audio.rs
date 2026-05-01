@@ -64,12 +64,11 @@ pub fn read_wav(path: &std::path::Path) -> anyhow::Result<(Vec<f32>, u32)> {
 
 /// Spawn a microphone capture thread.
 ///
-/// The thread reads from cpal and sends f32 mono chunks via `tx`.
-/// If `device_name` is provided AND not "Default", finds the matching input device.
-/// Otherwise uses the system default input device.
+/// Always outputs **16kHz mono f32** to `tx`, resampling internally
+/// when the device's native format differs.
 ///
 /// Returns a stop function that the caller MUST call to stop capture and
-/// release the audio stream. Dropping without calling leaks the stream.
+/// release the audio stream.
 pub fn start_mic_capture(
     tx: mpsc::Sender<Vec<f32>>,
     device_name: Option<&str>,
@@ -81,7 +80,6 @@ pub fn start_mic_capture(
             host.default_input_device()
                 .ok_or_else(|| anyhow::anyhow!("No default input device found"))?
         } else {
-            // Find device by name (case-insensitive substring match)
             let lower = name.to_lowercase();
             let devices: Vec<cpal::Device> = host.input_devices()?.collect();
             let found = devices.into_iter().find(|d| {
@@ -90,11 +88,7 @@ pub fn start_mic_capture(
             match found {
                 Some(d) => d,
                 None => {
-                    // Fall back to default if specified device not found
-                    eprintln!(
-                        "[Audio] Device '{}' not found, falling back to default",
-                        name
-                    );
+                    eprintln!("[Audio] Device '{}' not found, using default", name);
                     host.default_input_device()
                         .ok_or_else(|| anyhow::anyhow!("No input device found"))?
                 }
@@ -106,119 +100,116 @@ pub fn start_mic_capture(
     };
 
     let dev_name = device.name().unwrap_or_else(|_| "unknown".into());
-    eprintln!("[Audio] Using device: {}", dev_name);
+    eprintln!("[Audio] Device: {}", dev_name);
 
-    // Build config: try 16000Hz mono with Fixed(1600) first.
-    // If that fails, fall back to Default buffer size.
-    let desired_config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
-        buffer_size: cpal::BufferSize::Fixed(1600), // 100ms at 16kHz
-    };
+    // ── Determine stream config ──
+    let target_rate = 16000u32;
+    let (config, needs_resample, native_rate, native_ch) =
+        choose_config(&device, target_rate)?;
+
+    if needs_resample {
+        eprintln!(
+            "[Audio] Resampling {}ch {}Hz -> 1ch {}Hz",
+            native_ch, native_rate.0, target_rate
+        );
+    }
 
     let (stop_tx, _stop_rx) = std::sync::mpsc::channel::<()>();
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let sf_rs = Arc::clone(&stop_flag);
+    let tx_rs = tx.clone();
 
-    // Clones for multiple fallback attempts
-    let tx_fb1 = tx.clone();
-    let sf_fb1 = Arc::clone(&stop_flag);
-    let tx_fb2 = tx.clone();
-    let sf_fb2 = Arc::clone(&stop_flag);
-
-    // Attempt 1: desired config (16kHz mono Fixed(1600))
-    let stream_result = device.build_input_stream(
-        &desired_config,
-        {
-            let stop_flag = Arc::clone(&stop_flag);
+    // Build the stream: either direct (16kHz native) or with resampling
+    let stream = if needs_resample {
+        device.build_input_stream(
+            &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if stop_flag.load(Ordering::Relaxed) {
+                if sf_rs.load(Ordering::Relaxed) {
                     return;
                 }
-                let _ = tx.send(data.to_vec());
-            }
-        },
-        |err| {
-            eprintln!("[Audio] Capture error: {}", err);
-        },
-        None,
-    );
-
-    let stream = match stream_result {
-        Ok(s) => s,
-        Err(e_fixed) => {
-            // Attempt 2: Default buffer size (same sample rate, channels)
-            eprintln!(
-                "[Audio] Fixed(1600) not supported on this device, trying Default buffer: {}",
-                e_fixed
-            );
-            let fallback_config = cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(16000),
-                buffer_size: cpal::BufferSize::Default,
-            };
-            match device.build_input_stream(
-                &fallback_config,
+                let resampled = downsample_to_mono_16k(data, native_rate.0, native_ch);
+                if !resampled.is_empty() {
+                    let _ = tx_rs.send(resampled);
+                }
+            },
+            |err| eprintln!("[Audio] Error: {}", err),
+            None,
+        )?
+    } else {
+        device.build_input_stream(
+            &config,
+            {
+                let stop_flag = Arc::clone(&stop_flag);
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if sf_fb1.load(Ordering::Relaxed) {
+                    if stop_flag.load(Ordering::Relaxed) {
                         return;
                     }
-                    let _ = tx_fb1.send(data.to_vec());
-                },
-                |err| {
-                    eprintln!("[Audio] Capture error: {}", err);
-                },
-                None,
-            ) {
-                Ok(s) => {
-                    eprintln!("[Audio] Default buffer size OK");
-                    s
+                    let _ = tx.send(data.to_vec());
                 }
-                Err(e_default) => {
-                    // Attempt 3: use device's native default config
-                    let native = device.default_input_config().map_err(|e| {
-                        anyhow::anyhow!(
-                            "Fixed(1600): {}, Default: {}, Native config query: {}",
-                            e_fixed, e_default, e
-                        )
-                    })?;
-                    let native_config = native.config();
-                    eprintln!(
-                        "[Audio] 16kHz not supported, using native: {:?} ch={:?} buffer={:?}",
-                        native_config.sample_rate,
-                        native.channels(),
-                        native_config.buffer_size,
-                    );
-                    device.build_input_stream(
-                        &native_config,
-                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                            if sf_fb2.load(Ordering::Relaxed) {
-                                return;
-                            }
-                            let _ = tx_fb2.send(data.to_vec());
-                        },
-                        |err| {
-                            eprintln!("[Audio] Capture error: {}", err);
-                        },
-                        None,
-                    ).map_err(|e| {
-                        anyhow::anyhow!(
-                            "Fixed(1600): {}, Default: {}, Native: {}",
-                            e_fixed, e_default, e
-                        )
-                    })?
-                }
-            }
-        }
+            },
+            |err| eprintln!("[Audio] Error: {}", err),
+            None,
+        )?
     };
 
     stream.play()?;
     let mut stream_opt = Some(stream);
 
     Ok(Box::new(move || {
-        // Signal the callback to stop
         stop_flag.store(true, Ordering::Relaxed);
         let _ = stop_tx.send(());
-        // Drop the stream — cpal stops capture on drop
         drop(stream_opt.take());
     }))
+}
+
+/// Decide which cpal config to use, and whether resampling is needed.
+fn choose_config(
+    device: &cpal::Device,
+    target_rate: u32,
+) -> anyhow::Result<(cpal::StreamConfig, bool, cpal::SampleRate, u16)> {
+    // Check supported configs for 16kHz
+    let supports_16k = device
+        .supported_input_configs()
+        .map(|cfgs| {
+            cfgs.into_iter().any(|c| {
+                c.min_sample_rate() <= cpal::SampleRate(target_rate)
+                    && c.max_sample_rate() >= cpal::SampleRate(target_rate)
+                    && c.channels() >= 1
+            })
+        })
+        .unwrap_or(false);
+
+    if supports_16k {
+        let config = cpal::StreamConfig {
+            channels: 1,
+            sample_rate: cpal::SampleRate(target_rate),
+            buffer_size: cpal::BufferSize::Default,
+        };
+        return Ok((config, false, cpal::SampleRate(0), 0));
+    }
+
+    // Not supported — use native config with resampling
+    let native = device.default_input_config()?;
+    let native_rate = native.sample_rate();
+    let native_ch = native.channels().min(2);
+    let config = native.config();
+    Ok((config, true, native_rate, native_ch))
+}
+
+/// Downsample multi-channel multi-rate audio to 16kHz mono f32.
+///
+/// Uses simple averaging: for each output sample at 16kHz,
+/// averages the corresponding `factor` input samples.
+fn downsample_to_mono_16k(data: &[f32], in_rate: u32, in_ch: u16) -> Vec<f32> {
+    let factor = (in_rate as usize / 16000) * in_ch as usize;
+    if factor == 1 {
+        return data.to_vec(); // already 16kHz mono
+    }
+    let out_len = data.len() / factor;
+    let mut out = Vec::with_capacity(out_len);
+    for chunk in data.chunks_exact(factor) {
+        let avg = chunk.iter().sum::<f32>() / factor as f32;
+        out.push(avg);
+    }
+    out
 }
