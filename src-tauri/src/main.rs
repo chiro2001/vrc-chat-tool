@@ -617,9 +617,19 @@ fn check_stt_model(stt_config_path: String) -> Result<SttModelStatus, String> {
     let config = match stt_server::Config::from_file(&stt_config_path) {
         Ok(c) => c,
         Err(e) => {
-            let msg = format!("Failed to load STT config: {}", e);
-            eprintln!("[check_stt_model] {}", msg);
-            return Err(msg);
+            let err_msg = format!("{}", e);
+            eprintln!("[check_stt_model] load failed: {}", err_msg);
+            if err_msg.contains("not found") {
+                eprintln!("[check_stt_model] creating default stt-config.yaml");
+                let default_yaml = include_str!("../../stt-config.yaml");
+                if let Err(w) = std::fs::write(&stt_config_path, default_yaml) {
+                    return Err(format!("Failed to create default stt-config.yaml: {}", w));
+                }
+                stt_server::Config::from_file(&stt_config_path)
+                    .map_err(|e2| format!("Failed after creating default config: {}", e2))?
+            } else {
+                return Err(format!("Failed to load STT config: {}", e));
+            }
         }
     };
 
