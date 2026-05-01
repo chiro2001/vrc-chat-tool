@@ -59,6 +59,9 @@ const translations: Record<Lang, Record<string, string>> = {
     "history.title": "历史记录",
     "history.empty": "暂无记录",
     "history.clear": "清除",
+    "history.confirmClear": "确认清除所有历史记录?",
+    "history.yes": "确认",
+    "history.no": "取消",
   },
   en: {
     "app.title": "VRC Voice OSC",
@@ -114,6 +117,9 @@ const translations: Record<Lang, Record<string, string>> = {
     "history.title": "History",
     "history.empty": "No history",
     "history.clear": "Clear",
+    "history.confirmClear": "Clear all history?",
+    "history.yes": "Yes",
+    "history.no": "No",
   },
 };
 

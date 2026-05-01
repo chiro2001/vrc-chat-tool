@@ -582,6 +582,67 @@ h2 {
 .log-module { color: #ab47bc; min-width: 60px; }
 .log-message { color: #ccc; flex: 1; }
 
+/* ---- Sentence items in results ---- */
+.sentences-list { margin-top: 0.5rem; }
+.sentence-item {
+  padding: 0.4rem 0.6rem;
+  margin: 0.25rem 0;
+  background: #1a3a2a;
+  border-left: 3px solid #4caf50;
+  border-radius: 4px;
+  color: #a5d6a7;
+  font-size: 0.9rem;
+}
+
+/* ---- History pagination ---- */
+.history-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: center;
+  padding: 0.5rem 0;
+}
+.history-pagination button {
+  padding: 0.2rem 0.6rem;
+  background: #444;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.history-pagination button:disabled { opacity: 0.4; cursor: default; }
+.page-info { color: #aaa; font-size: 0.85rem; }
+.page-jump {
+  width: 40px;
+  padding: 0.15rem;
+  background: #333;
+  color: #e0e0e0;
+  border: 1px solid #555;
+  border-radius: 3px;
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+/* ---- Clear confirmation ---- */
+.history-actions { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
+.clear-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #ffa726;
+}
+.confirm-yes, .confirm-no {
+  padding: 0.2rem 0.6rem;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.confirm-yes { background: #c62828; color: #fff; }
+.confirm-no { background: #444; color: #ccc; }
+
 /* ---- Responsive ---- */
 @media (max-width: 600px) {
   header {
@@ -597,6 +658,16 @@ h2 {
   .volume-bar {
     width: 100%;
   }
+}
+
+@media (max-width: 500px) {
+  .app-container { padding: 0.5rem; }
+  .control-panel { flex-direction: column; gap: 0.5rem; }
+  .device-selector { width: 100%; }
+  .device-selector select { width: 100%; }
+  .volume-meter { width: 100%; }
+  .volume-bar { width: 100%; }
+  header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
 }
 
 /* Modal */

@@ -29,6 +29,7 @@ function App() {
   const [apiState, setApiState] = useState<ApiState>("idle");
   const [lastResult, setLastResult] = useState("");
   const [currentPartial, setCurrentPartial] = useState("");
+  const [sentences, setSentences] = useState<string[]>([]);
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
 
@@ -45,6 +46,9 @@ function App() {
 
   // Recognition history
   const [recognitionHistory, setRecognitionHistory] = useState<any[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize] = useState(10);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   // Audio devices
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
@@ -96,12 +100,17 @@ function App() {
       setApiState("recording");
       setCurrentPartial("");
       setLastResult("");
+      setSentences([]);
       setLastError("");
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-partial", (event) => {
       setApiState("recognizing");
       setCurrentPartial(event.payload);
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("recording-sentence", (event) => {
+      setSentences(prev => [...prev, event.payload]);
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-complete", (event) => {
@@ -206,7 +215,7 @@ function App() {
 
   // Recognition history
   const loadHistory = useCallback(() => {
-    invoke<any[]>("get_recognition_history").then(setRecognitionHistory).catch(console.error);
+    invoke<any[]>("get_recognition_history").then(entries => { setRecognitionHistory(entries); setHistoryPage(1); }).catch(console.error);
   }, []);
 
   const clearHistory = useCallback(() => {
@@ -276,13 +285,16 @@ function App() {
           {t("config.title")}
         </button>
 
-        <button
-          className={`record-button ${isRecording ? "recording" : ""}`}
-          onClick={toggleRecording}
-        >
-          {isRecording ? t("control.stop") : t("control.startRecording")}
-        </button>
       </section>
+
+      {/* Record Button (full width) */}
+      <button
+        className={`record-button ${isRecording ? "recording" : ""}`}
+        onClick={toggleRecording}
+        style={{ width: "100%", marginTop: "0.5rem" }}
+      >
+        {isRecording ? t("control.stop") : t("control.startRecording")}
+      </button>
 
       {/* Results Display */}
       <section className="results-panel">
@@ -292,10 +304,11 @@ function App() {
             <span className="text">{currentPartial}</span>
           </div>
         )}
-        {lastResult && (
-          <div className="final-result">
-            <span className="label">{t("results.result")}</span>
-            <span className="text">{lastResult}</span>
+        {sentences.length > 0 && (
+          <div className="sentences-list">
+            {sentences.map((s, i) => (
+              <div key={i} className="sentence-item">{s}</div>
+            ))}
           </div>
         )}
         {lastError && (
@@ -312,17 +325,38 @@ function App() {
         {recognitionHistory.length === 0 ? (
           <p className="history-empty">{t("history.empty")}</p>
         ) : (
-          <div className="history-list">
-            {recognitionHistory.map((entry: any) => (
-              <div key={entry.id} className="history-entry">
-                <span className="history-time">{entry.timestamp}</span>
-                <span className="history-text">{entry.text}</span>
-                <span className="history-source">{entry.source}</span>
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="history-list">
+              {recognitionHistory
+                .slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
+                .map((entry: any) => (
+                  <div key={entry.id} className="history-entry">
+                    <span className="history-time">{entry.timestamp}</span>
+                    <span className="history-text">{entry.text}</span>
+                    <span className="history-source">{entry.source}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="history-pagination">
+              <button onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage <= 1}>‹</button>
+              <span className="page-info">{historyPage} / {Math.ceil(recognitionHistory.length / historyPageSize)}</span>
+              <button onClick={() => setHistoryPage(p => p + 1)} disabled={historyPage >= Math.ceil(recognitionHistory.length / historyPageSize)}>›</button>
+              <input type="number" className="page-jump" min="1" max={Math.ceil(recognitionHistory.length / historyPageSize)}
+                placeholder="页" onKeyDown={(e) => { if (e.key === 'Enter') { const v = parseInt((e.target as HTMLInputElement).value); if (v >= 1) setHistoryPage(v); } }} />
+            </div>
+          </>
         )}
-        <button className="history-clear" onClick={clearHistory}>{t("history.clear")}</button>
+        <div className="history-actions">
+          {!showClearConfirm ? (
+            <button className="history-clear" onClick={() => setShowClearConfirm(true)}>{t("history.clear")}</button>
+          ) : (
+            <span className="clear-confirm">
+              <span>{t("history.confirmClear")}</span>
+              <button className="confirm-yes" onClick={() => { clearHistory(); setShowClearConfirm(false); }}>{t("history.yes")}</button>
+              <button className="confirm-no" onClick={() => setShowClearConfirm(false)}>{t("history.no")}</button>
+            </span>
+          )}
+        </div>
       </section>
 
       {/* Test Recording Modal */}
