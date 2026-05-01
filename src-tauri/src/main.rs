@@ -613,10 +613,18 @@ fn save_device_index(device_idx: u32) {
 /// Check whether STT model files exist on disk.
 #[tauri::command]
 fn check_stt_model(stt_config_path: String) -> Result<SttModelStatus, String> {
-    let config = stt_server::Config::from_file(&stt_config_path)
-        .map_err(|e| format!("Failed to load STT config: {}", e))?;
+    eprintln!("[check_stt_model] checking config: {}", stt_config_path);
+    let config = match stt_server::Config::from_file(&stt_config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("Failed to load STT config: {}", e);
+            eprintln!("[check_stt_model] {}", msg);
+            return Err(msg);
+        }
+    };
 
     let target_dir = config.asr_model_path();
+    eprintln!("[check_stt_model] target_dir: {:?}", target_dir);
     let required = [
         config.asr.encoder.as_str(),
         config.asr.decoder.as_str(),
@@ -626,10 +634,16 @@ fn check_stt_model(stt_config_path: String) -> Result<SttModelStatus, String> {
 
     let missing: Vec<String> = required
         .iter()
-        .filter(|f| !target_dir.join(f).exists())
+        .filter(|f| {
+            let p = target_dir.join(f);
+            let exists = p.exists();
+            eprintln!("[check_stt_model] {} -> {}", p.display(), if exists { "OK" } else { "MISSING" });
+            !exists
+        })
         .map(|f| f.to_string())
         .collect();
 
+    eprintln!("[check_stt_model] missing: {:?}, exists: {}", missing, missing.is_empty());
     Ok(SttModelStatus {
         exists: missing.is_empty(),
         model_name: config.asr.model_name.clone(),

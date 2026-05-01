@@ -102,6 +102,7 @@ function App() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({ phase: "", current: 0, total: 0 });
   const [downloadError, setDownloadError] = useState("");
+  const [modelCheckError, setModelCheckError] = useState("");
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [currentModelName, setCurrentModelName] = useState("");
 
@@ -143,8 +144,13 @@ function App() {
         .then((status) => {
           setModelStatus(status);
           setCurrentModelName(status.model_name);
+          setModelCheckError("");
         })
-        .catch(() => setModelStatus(null));
+        .catch((e) => {
+          console.error("check_stt_model failed:", e);
+          setModelStatus(null);
+          setModelCheckError(String(e));
+        });
     } else {
       setModelStatus(null);
     }
@@ -261,8 +267,9 @@ function App() {
         .then((status) => {
           setModelStatus(status);
           setCurrentModelName(status.model_name);
+          setModelCheckError("");
         })
-        .catch(() => setModelStatus(null));
+        .catch(() => { setModelStatus(null); setModelCheckError("模型检查失败"); });
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("stt-model-download-error", (event) => {
@@ -658,7 +665,7 @@ function App() {
                         </div>
                       )
                     ) : (
-                      <span className="model-status checking">{t("model.statusChecking")}</span>
+                      <span className="model-status checking">{modelCheckError ? t("model.checkError", modelCheckError) : t("model.statusChecking")}</span>
                     )}
                     {isDownloading && (
                       <div className="download-progress">
