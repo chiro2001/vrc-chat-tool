@@ -850,8 +850,12 @@ h2 {
 
 .stt-dot.stt-error,
 .stt-dot.stt-disconnected {
-  background: #f44336;
-  box-shadow: 0 0 4px rgba(244, 67, 54, 0.6);
+  background-color: #f44336;
+  box-shadow: 0 0 4px #f44336;
+}
+.stt-dot.stt-disabled {
+  background-color: #888;
+  box-shadow: none;
 }
 
 .stt-dot.stt-unknown {

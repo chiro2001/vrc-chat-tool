@@ -18,6 +18,7 @@ interface AppConfig {
   asr_provider: string;
   local_stt_url: string;
   global_hotkey_enabled: boolean;
+  trigger_listener_enabled: boolean;
 }
 
 interface AudioDevice {
@@ -79,6 +80,7 @@ function App() {
     asr_provider: "tencent",
     local_stt_url: "ws://192.168.101.7:8765",
     global_hotkey_enabled: true,
+    trigger_listener_enabled: true,
   });
 
   // Credential form state
@@ -301,6 +303,7 @@ function App() {
 
   // STT status helpers
   const getSttStatusClass = (status: string): string => {
+    if (status === "disabled") return "disabled";
     if (status.startsWith("error")) return "error";
     if (status === "disconnected") return "disconnected";
     if (status === "connected") return "connected";
@@ -309,6 +312,7 @@ function App() {
   };
 
   const getSttStatusText = (status: string): string => {
+    if (status === "disabled") return t("stt.disabled");
     if (status.startsWith("error")) return t("stt.error");
     if (status === "disconnected") return t("stt.disconnected");
     if (status === "connected") return t("stt.connected");
@@ -607,6 +611,15 @@ function App() {
                   <input type="checkbox" checked={config.global_hotkey_enabled}
                     onChange={(e) => updateConfig("global_hotkey_enabled", e.target.checked)} />
                   {t("config.hotkeyEnabled")}
+                </label>
+              </div>
+
+              <h3>{t("config.triggerListener")}</h3>
+              <div className="config-field">
+                <label>
+                  <input type="checkbox" checked={config.trigger_listener_enabled}
+                    onChange={(e) => updateConfig("trigger_listener_enabled", e.target.checked)} />
+                  {t("config.triggerListenerEnabled")}
                 </label>
               </div>
 

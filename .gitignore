@@ -21,3 +21,10 @@ data/
 # Python
 __pycache__/
 *.pyc
+
+# Reference repos
+streaming-stt-server/
+
+# STT server local config
+stt-config.yaml
+models/

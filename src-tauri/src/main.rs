@@ -226,9 +226,9 @@ fn get_config() -> Option<config::AppConfig> {
 
 #[tauri::command]
 fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(), String> {
-    // Check if hotkey setting changed
-    let hotkey_was_enabled = CURRENT_CONFIG.lock().unwrap()
-        .as_ref().map(|c| c.global_hotkey_enabled).unwrap_or(false);
+    let old_config = CURRENT_CONFIG.lock().unwrap().clone();
+    let hotkey_was_enabled = old_config.as_ref().map(|c| c.global_hotkey_enabled).unwrap_or(false);
+    let trigger_was_enabled = old_config.as_ref().map(|c| c.trigger_listener_enabled).unwrap_or(false);
 
     if let Err(e) = config.save() {
         return Err(format!("Failed to save config: {}", e));
@@ -240,6 +240,17 @@ fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(), S
         hotkey::start(app.clone());
     } else if !config.global_hotkey_enabled && hotkey_was_enabled {
         hotkey::stop();
+    }
+
+    // Start or stop trigger listener based on config change
+    if config.trigger_listener_enabled && !trigger_was_enabled {
+        if !config.local_stt_url.is_empty() {
+            log::info("main", "Trigger listener enabled, starting...");
+            trigger::start_trigger_listener(Arc::new(config.clone()));
+        }
+    } else if !config.trigger_listener_enabled && trigger_was_enabled {
+        log::info("main", "Trigger listener disabled, stopping...");
+        trigger::stop_capture();
     }
 
     Ok(())
@@ -532,11 +543,12 @@ fn main() {
         log::debug("main", "Hotkey enabled, deferring to Tauri setup");
     }
 
-    // Start always-on trigger listener (local STT for voice commands)
-    // Always start if local_stt_url is configured, regardless of asr_provider
-    if !config.local_stt_url.is_empty() {
+    // Start always-on trigger listener if enabled AND local_stt_url configured
+    if config.trigger_listener_enabled && !config.local_stt_url.is_empty() {
         log::info("main", &format!("Starting trigger listener, STT URL: {}", config.local_stt_url));
         trigger::start_trigger_listener(Arc::new(config.clone()));
+    } else if !config.trigger_listener_enabled {
+        log::info("main", "Trigger listener disabled in config");
     } else {
         log::info("main", "No local STT URL configured, trigger listener disabled");
     }
@@ -576,19 +588,31 @@ fn main() {
                         let _ = app_handle.emit_all("volume-update", vol);
                     }
 
-                    // Emit STT status when it changes
-                    let stt_status = trigger::stt_status();
-                    if stt_status != last_stt_status {
-                        last_stt_status = stt_status.clone();
-                        let _ = app_handle.emit_all("trigger-stt-status", &stt_status);
-                        log::info("trigger", &format!("STT status changed: {}", stt_status));
+                    // Emit STT status only when trigger listener is enabled in config
+                    {
+                        let cfg = CURRENT_CONFIG.lock().unwrap();
+                        let listener_enabled = cfg.as_ref().map(|c| c.trigger_listener_enabled).unwrap_or(false);
+                        if listener_enabled {
+                            let stt_status = trigger::stt_status();
+                            if stt_status != last_stt_status {
+                                last_stt_status = stt_status.clone();
+                                let _ = app_handle.emit_all("trigger-stt-status", &stt_status);
+                                log::info("trigger", &format!("STT status changed: {}", stt_status));
+                            }
+                        } else {
+                            let disabled_status = "disabled";
+                            if last_stt_status != disabled_status {
+                                last_stt_status = disabled_status.to_string();
+                                let _ = app_handle.emit_all("trigger-stt-status", disabled_status);
+                            }
+                        }
                     }
 
-                    // Auto-restart trigger listener if it died and STT is configured
+                    // Auto-restart trigger listener if it died and still enabled
                     if !trigger::is_active() && trigger::can_restart() {
                         let cfg = CURRENT_CONFIG.lock().unwrap().clone();
                         if let Some(ref c) = cfg {
-                            if !c.local_stt_url.is_empty() {
+                            if c.trigger_listener_enabled && !c.local_stt_url.is_empty() {
                                 log::warn("trigger", "Listener died, attempting restart");
                                 trigger::start_trigger_listener(Arc::new(c.clone()));
                             }
