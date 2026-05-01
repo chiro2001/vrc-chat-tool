@@ -7,7 +7,7 @@ edition = "2021"
 tauri-build = { version = "1.0", features = [] }
 
 [dependencies]
-tauri = { version = "1", features = ["path-all", "http-all", "fs-read-file", "fs-write-file", "clipboard-all"] }
+tauri = { version = "1", features = ["custom-protocol", "path-all", "http-all", "fs-read-file", "fs-write-file", "clipboard-all"] }
 cpal = "0.15"
 rosc = "0.7"
 tokio = { version = "1", features = ["full"] }
