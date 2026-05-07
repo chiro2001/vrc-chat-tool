@@ -7,6 +7,7 @@ use vrc_chat_tool::osc;
 use vrc_chat_tool::trigger;
 use vrc_chat_tool::hotkey;
 use vrc_chat_tool::log;
+use vrc_chat_tool::state;
 
 mod e2e_server;
 mod history;
@@ -15,31 +16,14 @@ use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::thread;
 use tauri::Manager;
 use std::fs;
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// --- Global State ---
-static CURRENT_CONFIG: Mutex<Option<config::AppConfig>> = Mutex::new(None);
-static SHOULD_STOP: AtomicBool = AtomicBool::new(false);
-static IS_RECORDING: AtomicBool = AtomicBool::new(false);
-
-// --- Log System ---
-static LOG_BUFFER: Mutex<Vec<LogEntry>> = Mutex::new(Vec::new());
-const MAX_LOG_ENTRIES: usize = 200;
-
-#[derive(Clone, serde::Serialize)]
-struct LogEntry {
-    timestamp: u64,
-    level: String,
-    message: String,
-    module: String,
-}
-
+// --- Log System (emit depends on tauri::AppHandle) ---
 fn emit_log(app: &tauri::AppHandle, level: &str, module: &str, message: &str) {
-    let entry = LogEntry {
+    let entry = state::LogEntry {
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64,
         level: level.to_string(),
         message: message.to_string(),
@@ -47,9 +31,9 @@ fn emit_log(app: &tauri::AppHandle, level: &str, module: &str, message: &str) {
     };
 
     {
-        let mut buf = LOG_BUFFER.lock().unwrap();
+        let mut buf = state::LOG_BUFFER.lock().unwrap();
         buf.push(entry.clone());
-        if buf.len() > MAX_LOG_ENTRIES {
+        if buf.len() > state::MAX_LOG_ENTRIES {
             buf.remove(0);
         }
     }
@@ -57,19 +41,9 @@ fn emit_log(app: &tauri::AppHandle, level: &str, module: &str, message: &str) {
     let _ = app.emit_all("log-entry", entry);
 }
 
-// --- Recording Test Commands ---
-
-fn recordings_dir() -> PathBuf {
-    let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    dir.push("tmp");
-    dir.push("recordings");
-    let _ = fs::create_dir_all(&dir);
-    dir
-}
-
 #[tauri::command]
 fn save_test_recording(pcm_data: Vec<u8>, filename: String) -> Result<String, String> {
-    let dir = recordings_dir();
+    let dir = state::recordings_dir();
     let filepath = dir.join(&filename);
 
     let header = audio::capture::create_wav_header(pcm_data.len() as u32, 16000, 16, 1);
@@ -167,7 +141,7 @@ const SUPPORTED_MODELS: &[AvailableModel] = &[
 
 #[tauri::command]
 fn list_test_recordings() -> Result<Vec<RecordingInfo>, String> {
-    let dir = recordings_dir();
+    let dir = state::recordings_dir();
     let mut recordings = Vec::new();
 
     if dir.exists() {
@@ -196,24 +170,24 @@ fn list_test_recordings() -> Result<Vec<RecordingInfo>, String> {
 
 #[tauri::command]
 fn delete_test_recording(filename: String) -> Result<(), String> {
-    let filepath = recordings_dir().join(&filename);
+    let filepath = state::recordings_dir().join(&filename);
     fs::remove_file(&filepath)
         .map_err(|e| format!("Failed to delete: {}", e))
 }
 
 #[tauri::command]
-fn get_recent_logs() -> Vec<LogEntry> {
-    LOG_BUFFER.lock().unwrap().clone()
+fn get_recent_logs() -> Vec<state::LogEntry> {
+    state::LOG_BUFFER.lock().unwrap().clone()
 }
 
 #[tauri::command]
 fn clear_logs() {
-    LOG_BUFFER.lock().unwrap().clear();
+    state::LOG_BUFFER.lock().unwrap().clear();
 }
 
 #[tauri::command]
 fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result<(), String> {
-    SHOULD_STOP.store(false, Ordering::SeqCst);
+    state::SHOULD_STOP.store(false, Ordering::SeqCst);
 
     let app_clone = app.clone();
     thread::spawn(move || {
@@ -260,7 +234,7 @@ fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) -> R
             }
         });
 
-        while !SHOULD_STOP.load(Ordering::SeqCst) {
+        while !state::SHOULD_STOP.load(Ordering::SeqCst) {
             thread::sleep(std::time::Duration::from_millis(100));
         }
         stop_signal.store(true, Ordering::SeqCst);
@@ -296,19 +270,19 @@ fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) -> R
 
 #[tauri::command]
 fn get_config() -> Option<config::AppConfig> {
-    CURRENT_CONFIG.lock().unwrap().clone()
+    state::CURRENT_CONFIG.lock().unwrap().clone()
 }
 
 #[tauri::command]
 fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(), String> {
-    let old_config = CURRENT_CONFIG.lock().unwrap().clone();
+    let old_config = state::CURRENT_CONFIG.lock().unwrap().clone();
     let hotkey_was_enabled = old_config.as_ref().map(|c| c.global_hotkey_enabled).unwrap_or(false);
     let trigger_was_enabled = old_config.as_ref().map(|c| c.trigger_listener_enabled).unwrap_or(false);
 
     if let Err(e) = config.save() {
         return Err(format!("Failed to save config: {}", e));
     }
-    *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
+    *state::CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
 
     // Start or stop global hotkey based on new config
     if config.global_hotkey_enabled && !hotkey_was_enabled {
@@ -338,13 +312,13 @@ fn reset_config() -> Result<config::AppConfig, String> {
     if let Err(e) = default_config.save() {
         return Err(format!("Failed to reset config: {}", e));
     }
-    *CURRENT_CONFIG.lock().unwrap() = Some(default_config.clone());
+    *state::CURRENT_CONFIG.lock().unwrap() = Some(default_config.clone());
     Ok(default_config)
 }
 
 #[tauri::command]
 fn get_tencent_credentials() -> Result<config::TencentCredentials, String> {
-    let cfg = CURRENT_CONFIG.lock().unwrap();
+    let cfg = state::CURRENT_CONFIG.lock().unwrap();
     let credentials_file = cfg.as_ref()
         .map(|c| c.tencent_credentials_file.clone())
         .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
@@ -353,7 +327,7 @@ fn get_tencent_credentials() -> Result<config::TencentCredentials, String> {
 
 #[tauri::command]
 fn save_tencent_credentials(app_id: String, secret_id: String, secret_key: String) -> Result<(), String> {
-    let cfg = CURRENT_CONFIG.lock().unwrap();
+    let cfg = state::CURRENT_CONFIG.lock().unwrap();
     let credentials_file = cfg.as_ref()
         .map(|c| c.tencent_credentials_file.clone())
         .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
@@ -375,7 +349,7 @@ fn start_recording_inner(
     cfg: &config::AppConfig,
 ) -> Result<(), String> {
     // Prevent concurrent recordings (double-start from trigger + manual click)
-    if IS_RECORDING.swap(true, Ordering::SeqCst) {
+    if state::IS_RECORDING.swap(true, Ordering::SeqCst) {
         return Err("Recording already in progress".to_string());
     }
 
@@ -383,7 +357,7 @@ fn start_recording_inner(
     let tencent_creds = if cfg.asr_provider == "tencent" {
         let creds = config::TencentCredentials::load(&cfg.tencent_credentials_file);
         if creds.app_id.is_empty() || creds.secret_id.is_empty() || creds.secret_key.is_empty() {
-            IS_RECORDING.store(false, Ordering::SeqCst);
+            state::IS_RECORDING.store(false, Ordering::SeqCst);
             return Err("Please configure Tencent Cloud credentials first".to_string());
         }
         Some(creds)
@@ -391,7 +365,7 @@ fn start_recording_inner(
         None
     };
 
-    SHOULD_STOP.store(false, Ordering::SeqCst);
+    state::SHOULD_STOP.store(false, Ordering::SeqCst);
 
     // Pause trigger listener's STT audio sending during recording
     // (trigger capture keeps running for volume display; WebSocket stays connected)
@@ -413,14 +387,14 @@ fn start_recording_inner(
             let (pcm_tx, pcm_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
             let stop_signal = Arc::new(AtomicBool::new(false));
 
-            // Bridge: monitor global SHOULD_STOP and propagate to local stop_signal
+            // Bridge: monitor global state::SHOULD_STOP and propagate to local stop_signal
             let s_sig = stop_signal.clone();
             thread::spawn(move || {
-                while !SHOULD_STOP.load(Ordering::SeqCst) {
+                while !state::SHOULD_STOP.load(Ordering::SeqCst) {
                     thread::sleep(std::time::Duration::from_millis(100));
                 }
                 s_sig.store(true, Ordering::SeqCst);
-                SHOULD_STOP.store(false, Ordering::SeqCst);
+                state::SHOULD_STOP.store(false, Ordering::SeqCst);
             });
 
             let stop_signal_for_capture = stop_signal.clone();
@@ -519,7 +493,7 @@ fn start_recording_inner(
                         // Check stop trigger phrase in ASR output
                         if trigger::matches_trigger(partial_text, &trigger_stop_partial) {
                             log::info("recorder", &format!("STOP detected in partial: '{}'", partial_text));
-                            SHOULD_STOP.store(true, Ordering::SeqCst);
+                            state::SHOULD_STOP.store(true, Ordering::SeqCst);
                         }
                     },
                     move |sentence_text: &str| {
@@ -531,7 +505,7 @@ fn start_recording_inner(
                         // Check stop trigger phrase in sentence output
                         if trigger::matches_trigger(sentence_text, &trigger_stop_sentence) {
                             log::info("recorder", &format!("STOP detected in sentence: '{}'", sentence_text));
-                            SHOULD_STOP.store(true, Ordering::SeqCst);
+                            state::SHOULD_STOP.store(true, Ordering::SeqCst);
                         }
                     },
                 ).await
@@ -553,7 +527,7 @@ fn start_recording_inner(
         // Always resume trigger listener audio after recording stops
         trigger::resume_audio();
 
-        IS_RECORDING.store(false, Ordering::SeqCst);
+        state::IS_RECORDING.store(false, Ordering::SeqCst);
 
         match result {
             Ok(text) => {
@@ -573,7 +547,7 @@ fn start_recording_inner(
 
 #[tauri::command]
 fn start_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result<(), String> {
-    let cfg = CURRENT_CONFIG
+    let cfg = state::CURRENT_CONFIG
         .lock()
         .unwrap()
         .clone()
@@ -594,7 +568,7 @@ fn clear_recognition_history() {
 
 #[tauri::command]
 fn stop_recording() -> Result<(), String> {
-    SHOULD_STOP.store(true, Ordering::SeqCst);
+    state::SHOULD_STOP.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -751,7 +725,7 @@ fn main() {
 
     // Load config on startup
     let config = config::AppConfig::load().unwrap_or_default();
-    *CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
+    *state::CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
 
     // Enable global hotkey (F10) at startup if configured
     if config.global_hotkey_enabled {
@@ -779,7 +753,7 @@ fn main() {
 
             // Start global hotkey (F10) if enabled in config
             {
-                let cfg = CURRENT_CONFIG.lock().unwrap();
+                let cfg = state::CURRENT_CONFIG.lock().unwrap();
                 if let Some(ref c) = *cfg {
                     if c.global_hotkey_enabled {
                         log::info("main", "Starting F10 global hotkey");
@@ -810,7 +784,7 @@ fn main() {
 
                     // Emit STT status only when trigger listener is enabled in config
                     {
-                        let cfg = CURRENT_CONFIG.lock().unwrap();
+                        let cfg = state::CURRENT_CONFIG.lock().unwrap();
                         let listener_enabled = cfg.as_ref().map(|c| c.trigger_listener_enabled).unwrap_or(false);
                         if listener_enabled {
                             let stt_status = trigger::stt_status();
@@ -830,7 +804,7 @@ fn main() {
 
                     // Auto-restart trigger listener if it died and still enabled
                     if !trigger::is_active() && trigger::can_restart() {
-                        let cfg = CURRENT_CONFIG.lock().unwrap().clone();
+                        let cfg = state::CURRENT_CONFIG.lock().unwrap().clone();
                         if let Some(ref c) = cfg {
                             if c.trigger_listener_enabled
                                 && (c.trigger_stt_provider == "local_embedded" || !c.local_stt_url.is_empty())
@@ -846,11 +820,11 @@ fn main() {
                         log::info("trigger", &format!("Action: {}", text));
                         match text.as_str() {
                             "stop" => {
-                                SHOULD_STOP.store(true, Ordering::SeqCst);
+                                state::SHOULD_STOP.store(true, Ordering::SeqCst);
                             }
                             _ => {
                                 // start: invoke recording with proper error handling
-                                let cfg = CURRENT_CONFIG.lock().unwrap().clone();
+                                let cfg = state::CURRENT_CONFIG.lock().unwrap().clone();
                                 if let Some(cfg) = cfg {
                                     match start_recording_inner(
                                         app_handle.clone(),
