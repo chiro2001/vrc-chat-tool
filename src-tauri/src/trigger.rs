@@ -1,7 +1,6 @@
 /// Always-on local STT trigger listener.
 /// Runs in a background thread, captures audio, sends to local STT server,
 /// and detects trigger phrases to start/stop recording.
-// --- Imports ---
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}, Mutex};
 use std::thread;
 use futures_util::{SinkExt, StreamExt};
@@ -11,27 +10,47 @@ use crate::audio::capture::AudioCapture;
 use crate::speech::local_embedded::LocalEmbeddedRecognizer;
 use stt_server::Config as SttConfig;
 
-static TRIGGER_DETECTED: AtomicBool = AtomicBool::new(false);
-static LAST_TRIGGER_TEXT: Mutex<String> = Mutex::new(String::new());
+// --- Trigger State ---
+// Consolidates shared state into a single struct instead of 9 separate statics.
+// TRIGGER_PAUSED and LATEST_VOLUME are kept separate because they are accessed
+// on the hot audio capture callback path (every 200ms) and need minimal overhead.
+
+struct TriggerState {
+    detected: bool,
+    last_trigger_text: String,
+    active: bool,
+    stt_status: String,
+    last_restart_attempt: Option<std::time::Instant>,
+    /// Capture stop signal (set externally to stop the trigger listener's audio stream).
+    capture_stop: Option<Arc<AtomicBool>>,
+    /// Ring buffer of recently heard texts (for UI echo, max 20 entries).
+    heard_texts: Vec<String>,
+}
+
+impl TriggerState {
+    const fn new() -> Self {
+        Self {
+            detected: false,
+            last_trigger_text: String::new(),
+            active: false,
+            stt_status: String::new(),
+            last_restart_attempt: None,
+            capture_stop: None,
+            heard_texts: Vec::new(),
+        }
+    }
+}
+
+static TRIGGER_STATE: Mutex<TriggerState> = Mutex::new(TriggerState::new());
+
+/// Hot-path: whether trigger listener audio is paused (recording active).
+/// AtomicBool avoids Mutex contention on the audio capture callback.
 static TRIGGER_PAUSED: AtomicBool = AtomicBool::new(false);
-static TRIGGER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// STT connection status for UI display.
-/// Values: "starting", "connecting", "connected", "error: <reason>", "disconnected"
-static TRIGGER_STT_STATUS: Mutex<String> = Mutex::new(String::new());
-
-/// Timestamp of last restart attempt (to avoid tight restart loops).
-static LAST_RESTART_ATTEMPT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-
-/// Capture stop signal (set externally to stop the trigger listener's audio stream).
-static CAPTURE_STOP: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
-
-/// Ring buffer of recently heard texts (for UI echo, max 20 entries).
-static HEARD_TEXTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
-const MAX_HEARD_TEXTS: usize = 20;
-
-/// Latest volume computed by trigger listener's audio capture.
+/// Hot-path: latest volume from trigger listener's audio capture.
 static LATEST_VOLUME: Mutex<f32> = Mutex::new(0.0);
+
+const MAX_HEARD_TEXTS: usize = 20;
 
 /// Strip common Chinese and ASCII punctuation from text for matching.
 /// Preserves alphanumeric characters and whitespace.
@@ -56,21 +75,26 @@ pub fn matches_trigger(text: &str, phrase: &str) -> bool {
     clean_text.contains(&clean_phrase)
 }
 
+// --- Public API (replaces direct global access) ---
+
 pub fn is_trigger_detected() -> bool {
-    TRIGGER_DETECTED.swap(false, Ordering::SeqCst)
+    let mut state = TRIGGER_STATE.lock().unwrap();
+    let detected = state.detected;
+    state.detected = false;
+    detected
 }
 
 pub fn last_trigger_text() -> String {
-    LAST_TRIGGER_TEXT.lock().unwrap().clone()
+    TRIGGER_STATE.lock().unwrap().last_trigger_text.clone()
 }
 
 /// Drain all heard texts from the trigger listener (for UI echo).
 pub fn drain_heard_texts() -> Vec<String> {
-    let mut buf = HEARD_TEXTS.lock().unwrap();
-    if buf.is_empty() {
+    let mut state = TRIGGER_STATE.lock().unwrap();
+    if state.heard_texts.is_empty() {
         return Vec::new();
     }
-    std::mem::take(&mut *buf)
+    std::mem::take(&mut state.heard_texts)
 }
 
 /// Get the latest volume from the trigger listener's audio capture.
@@ -97,28 +121,29 @@ pub fn is_paused() -> bool {
 
 /// Check whether the trigger listener is currently running.
 pub fn is_active() -> bool {
-    TRIGGER_ACTIVE.load(Ordering::Relaxed)
+    TRIGGER_STATE.lock().unwrap().active
 }
 
 /// Stop the trigger listener's audio capture thread (for clean restart).
 /// The STT loop will exit when the capture channel closes.
 pub fn stop_capture() {
-    if let Some(ref signal) = *CAPTURE_STOP.lock().unwrap() {
+    let state = TRIGGER_STATE.lock().unwrap();
+    if let Some(ref signal) = state.capture_stop {
         signal.store(true, Ordering::SeqCst);
     }
 }
 
 /// Get current STT connection status (for UI display).
 pub fn stt_status() -> String {
-    TRIGGER_STT_STATUS.lock().unwrap().clone()
+    TRIGGER_STATE.lock().unwrap().stt_status.clone()
 }
 
 /// Check whether enough time has passed since the last restart attempt.
 /// Returns true if restart is allowed, false if we should wait longer.
 pub fn can_restart() -> bool {
     let now = std::time::Instant::now();
-    let mut last = LAST_RESTART_ATTEMPT.lock().unwrap();
-    match *last {
+    let mut state = TRIGGER_STATE.lock().unwrap();
+    match state.last_restart_attempt {
         Some(prev) => {
             if now.duration_since(prev).as_secs() < 5 {
                 return false;
@@ -126,23 +151,28 @@ pub fn can_restart() -> bool {
         }
         None => {}
     }
-    *last = Some(now);
+    state.last_restart_attempt = Some(now);
     true
 }
 
 /// Set stop detected from main recording pipeline (stop phrase detected in ASR output).
 pub fn set_stop_detected() {
-    TRIGGER_DETECTED.store(true, Ordering::SeqCst);
-    *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
+    let mut state = TRIGGER_STATE.lock().unwrap();
+    state.detected = true;
+    state.last_trigger_text = "stop".to_string();
     eprintln!("[Trigger] STOP detected from main pipeline");
 }
 
 /// Start the trigger listener in a background thread.
 /// Returns immediately. The thread runs until stopped externally or app exits.
 pub fn start_trigger_listener(config: Arc<AppConfig>) {
-    if TRIGGER_ACTIVE.swap(true, Ordering::SeqCst) {
-        crate::log::debug("trigger", "Listener already running, skipping start");
-        return;
+    {
+        let mut state = TRIGGER_STATE.lock().unwrap();
+        if state.active {
+            crate::log::debug("trigger", "Listener already running, skipping start");
+            return;
+        }
+        state.active = true;
     }
 
     let start_phrase = config.trigger_start.clone();
@@ -153,13 +183,13 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
     if trigger_provider != "local_embedded" && local_url.is_empty() {
         crate::log::info("trigger", "No local STT URL configured, trigger listener disabled");
-        TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+        TRIGGER_STATE.lock().unwrap().active = false;
         return;
     }
 
     thread::spawn(move || {
         crate::log::info("trigger", "Starting always-on listener...");
-        *TRIGGER_STT_STATUS.lock().unwrap() = "connecting".to_string();
+        TRIGGER_STATE.lock().unwrap().stt_status = "connecting".to_string();
 
         // Find an input device
         let capture = match AudioCapture::new() {
@@ -169,7 +199,7 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
             }
             Err(e) => {
                 crate::log::error("trigger", &format!("Failed to open audio device: {}", e));
-                TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                TRIGGER_STATE.lock().unwrap().active = false;
                 return;
             }
         };
@@ -180,8 +210,7 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
         // Store capture stop signal so external code can stop it
         {
-            let mut guard = CAPTURE_STOP.lock().unwrap();
-            *guard = Some(stop_signal.clone());
+            TRIGGER_STATE.lock().unwrap().capture_stop = Some(stop_signal.clone());
         }
 
         // Spawn audio capture thread
@@ -201,7 +230,6 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                     }
 
                     // Skip sending audio to STT if trigger listener is paused
-                    // (main recording pipeline handles audio during active recording)
                     if TRIGGER_PAUSED.load(Ordering::Relaxed) {
                         return;
                     }
@@ -228,31 +256,30 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                 Ok(c) => c,
                 Err(e) => {
                     crate::log::error("trigger", &format!("Failed to load STT config: {}", e));
-                    *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
+                    TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
                     stop_signal.store(true, Ordering::SeqCst);
-                    TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                    TRIGGER_STATE.lock().unwrap().active = false;
                     return;
                 }
             };
 
             let recognizer = match LocalEmbeddedRecognizer::new(stt_cfg) {
                 Ok(r) => {
-                    *TRIGGER_STT_STATUS.lock().unwrap() = "connected".to_string();
+                    TRIGGER_STATE.lock().unwrap().stt_status = "connected".to_string();
                     crate::log::info("trigger", "Local embedded STT engine ready");
                     r
                 }
                 Err(e) => {
                     crate::log::error("trigger", &format!("Failed to init local STT: {}", e));
-                    *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
+                    TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
                     stop_signal.store(true, Ordering::SeqCst);
-                    TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                    TRIGGER_STATE.lock().unwrap().active = false;
                     return;
                 }
             };
 
             let stream = recognizer.create_stream();
 
-            // Main processing loop: receive PCM, feed to engine, check endpoints
             loop {
                 match pcm_rx.blocking_recv() {
                     Some(chunk) => {
@@ -268,22 +295,24 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
                                         // Store for UI echo (ring buffer)
                                         {
-                                            let mut buf = HEARD_TEXTS.lock().unwrap();
-                                            buf.push(trimmed.to_string());
-                                            if buf.len() > MAX_HEARD_TEXTS {
-                                                buf.remove(0);
+                                            let mut state = TRIGGER_STATE.lock().unwrap();
+                                            state.heard_texts.push(trimmed.to_string());
+                                            if state.heard_texts.len() > MAX_HEARD_TEXTS {
+                                                state.heard_texts.remove(0);
                                             }
                                         }
 
                                         // Check trigger phrases
                                         if matches_trigger(trimmed, &start_phrase) {
                                             crate::log::info("trigger", &format!("START detected: '{}'", trimmed));
-                                            TRIGGER_DETECTED.store(true, Ordering::SeqCst);
-                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "start".to_string();
+                                            let mut state = TRIGGER_STATE.lock().unwrap();
+                                            state.detected = true;
+                                            state.last_trigger_text = "start".to_string();
                                         } else if matches_trigger(trimmed, &stop_phrase) {
                                             crate::log::info("trigger", &format!("STOP detected: '{}'", trimmed));
-                                            TRIGGER_DETECTED.store(true, Ordering::SeqCst);
-                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
+                                            let mut state = TRIGGER_STATE.lock().unwrap();
+                                            state.detected = true;
+                                            state.last_trigger_text = "stop".to_string();
                                         }
                                     }
                                 }
@@ -304,7 +333,7 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                 Err(e) => {
                     crate::log::error("trigger", &format!("Failed to create tokio runtime: {}", e));
                     stop_signal.store(true, Ordering::SeqCst);
-                    TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
+                    TRIGGER_STATE.lock().unwrap().active = false;
                     return;
                 }
             };
@@ -316,13 +345,13 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
             let ws = match tokio_tungstenite::connect_async(&url).await {
                 Ok((ws, _)) => {
                     crate::log::info("trigger", "Connected to local STT");
-                    *TRIGGER_STT_STATUS.lock().unwrap() = "connected".to_string();
+                    TRIGGER_STATE.lock().unwrap().stt_status = "connected".to_string();
                     ws
                 }
                 Err(e) => {
                     let msg = format!("Failed to connect to local STT: {}", e);
                     crate::log::error("trigger", &msg);
-                    *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
+                    TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
                     return;
                 }
             };
@@ -333,7 +362,6 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                     chunk = pcm_rx.recv() => {
                         match chunk {
                             Some(data) => {
-                                // Convert i16 PCM to f32 for local STT
                                 let f32_samples: Vec<f32> = data
                                     .chunks_exact(2)
                                     .map(|pair| {
@@ -365,29 +393,31 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
 
                                         // Store for UI echo (ring buffer)
                                         {
-                                            let mut buf = HEARD_TEXTS.lock().unwrap();
-                                            buf.push(trimmed.to_string());
-                                            if buf.len() > MAX_HEARD_TEXTS {
-                                                buf.remove(0);
+                                            let mut state = TRIGGER_STATE.lock().unwrap();
+                                            state.heard_texts.push(trimmed.to_string());
+                                            if state.heard_texts.len() > MAX_HEARD_TEXTS {
+                                                state.heard_texts.remove(0);
                                             }
                                         }
 
                                         // Check trigger phrases (punctuation-tolerant)
                                         if matches_trigger(trimmed, &start_phrase) {
                                             crate::log::info("trigger", &format!("START detected: '{}'", trimmed));
-                                            TRIGGER_DETECTED.store(true, Ordering::SeqCst);
-                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "start".to_string();
+                                            let mut state = TRIGGER_STATE.lock().unwrap();
+                                            state.detected = true;
+                                            state.last_trigger_text = "start".to_string();
                                         } else if matches_trigger(trimmed, &stop_phrase) {
                                             crate::log::info("trigger", &format!("STOP detected: '{}'", trimmed));
-                                            TRIGGER_DETECTED.store(true, Ordering::SeqCst);
-                                            *LAST_TRIGGER_TEXT.lock().unwrap() = "stop".to_string();
+                                            let mut state = TRIGGER_STATE.lock().unwrap();
+                                            state.detected = true;
+                                            state.last_trigger_text = "stop".to_string();
                                         }
                                     }
                                 }
                             }
                             Some(Ok(Message::Close(_))) => {
                                 crate::log::warn("trigger", "STT server closed connection");
-                                *TRIGGER_STT_STATUS.lock().unwrap() = "disconnected".to_string();
+                                TRIGGER_STATE.lock().unwrap().stt_status = "disconnected".to_string();
                                 break;
                             }
                             Some(Ok(_)) => {
@@ -396,11 +426,11 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                             Some(Err(e)) => {
                                 let msg = format!("STT WebSocket error: {}", e);
                                 crate::log::error("trigger", &msg);
-                                *TRIGGER_STT_STATUS.lock().unwrap() = format!("error: {}", e);
+                                TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
                                 break;
                             }
                             None => {
-                                *TRIGGER_STT_STATUS.lock().unwrap() = "disconnected".to_string();
+                                TRIGGER_STATE.lock().unwrap().stt_status = "disconnected".to_string();
                                 break;
                             }
                         }
@@ -414,10 +444,10 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
         // Cleanup: signal capture to stop if still running, clear state
         stop_signal.store(true, Ordering::SeqCst);
         {
-            let mut guard = CAPTURE_STOP.lock().unwrap();
-            *guard = None;
+            let mut state = TRIGGER_STATE.lock().unwrap();
+            state.capture_stop = None;
+            state.active = false;
         }
-        TRIGGER_ACTIVE.store(false, Ordering::SeqCst);
         crate::log::info("trigger", "Listener stopped");
     });
 }
@@ -471,7 +501,6 @@ mod tests {
 
     #[test]
     fn test_matches_trigger_in_sentence() {
-        // Trigger phrase appears within a longer sentence
         assert!(matches_trigger("请开始语音识别吧", "开始语音识别"));
         assert!(matches_trigger("请，开始，语音识别吧", "开始语音识别"));
     }
@@ -479,20 +508,20 @@ mod tests {
     #[test]
     fn test_drain_heard_texts() {
         {
-            let mut buf = HEARD_TEXTS.lock().unwrap();
-            buf.clear();
-            buf.push("hello".to_string());
-            buf.push("world".to_string());
+            let mut state = TRIGGER_STATE.lock().unwrap();
+            state.heard_texts.clear();
+            state.heard_texts.push("hello".to_string());
+            state.heard_texts.push("world".to_string());
         }
         let texts = drain_heard_texts();
         assert_eq!(texts, vec!["hello", "world"]);
-        // Should be empty after drain
         let texts2 = drain_heard_texts();
         assert!(texts2.is_empty());
     }
 
     #[test]
     fn test_pause_resume() {
+        TRIGGER_PAUSED.store(false, Ordering::SeqCst);
         assert!(!TRIGGER_PAUSED.load(Ordering::SeqCst));
         pause_audio();
         assert!(TRIGGER_PAUSED.load(Ordering::SeqCst));
