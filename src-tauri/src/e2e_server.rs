@@ -40,6 +40,26 @@ pub fn run_e2e_server() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = request.respond(response);
             }
 
+            (Method::Get, "/health") => {
+                let json = r#"{"status":"ok"}"#;
+                let response = Response::from_string(json).with_header(cors_header);
+                let _ = request.respond(response);
+            }
+
+            (Method::Get, "/devices") => {
+                let devices = AudioCapture::list_devices()
+                    .map(|devs| {
+                        devs.iter().map(|d| serde_json::json!({
+                            "name": d.name,
+                            "index": d.index,
+                        })).collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let json = serde_json::json!({ "devices": devices }).to_string();
+                let response = Response::from_string(json).with_header(cors_header);
+                let _ = request.respond(response);
+            }
+
             (Method::Post, "/start") => {
                 if is_recording.load(Ordering::SeqCst) {
                     let response = Response::from_string(r#"{"status":"error","message":"already recording"}"#)

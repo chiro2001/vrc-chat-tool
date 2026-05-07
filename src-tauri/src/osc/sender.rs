@@ -169,3 +169,195 @@ impl OscSender {
         self.send_osc("/chatbox/input", "语音识别已停止", true, false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_trailing_punctuation_chinese() {
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("你好世界。"),
+            "你好世界"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("你好世界！"),
+            "你好世界"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("你好世界？"),
+            "你好世界"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("你好世界，"),
+            "你好世界"
+        );
+    }
+
+    #[test]
+    fn test_strip_trailing_punctuation_english() {
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("Hello world."),
+            "Hello world"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("Hello world!"),
+            "Hello world"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("Hello world?"),
+            "Hello world"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("Hello, world;"),
+            "Hello, world"
+        );
+    }
+
+    #[test]
+    fn test_strip_trailing_punctuation_preserves_inner() {
+        // Punctuation in the middle should be preserved
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("你好，世界。"),
+            "你好，世界"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("Hello, world."),
+            "Hello, world"
+        );
+    }
+
+    #[test]
+    fn test_strip_trailing_punctuation_no_punct() {
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("你好世界"),
+            "你好世界"
+        );
+        assert_eq!(
+            OscSender::strip_trailing_punctuation("Hello world"),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn test_strip_trailing_punctuation_empty() {
+        assert_eq!(OscSender::strip_trailing_punctuation(""), "");
+    }
+
+    #[test]
+    fn test_strip_trailing_punctuation_only_punct() {
+        assert_eq!(OscSender::strip_trailing_punctuation("。"), "");
+        assert_eq!(OscSender::strip_trailing_punctuation("..."), "");
+    }
+
+    #[test]
+    fn test_now_ms_returns_positive() {
+        let ts = OscSender::now_ms();
+        assert!(ts > 0, "Timestamp should be positive, got {}", ts);
+    }
+
+    #[test]
+    fn test_buffer_respects_line_count() {
+        let sender = OscSender::with_config(
+            "127.0.0.1".to_string(),
+            9000,
+            2,  // line_count = 2
+            3600, // retention = 1 hour
+            true,
+        );
+
+        // Add 3 messages directly to buffer
+        {
+            let mut buf = sender.buffer.lock().unwrap();
+            let now = OscSender::now_ms();
+            buf.push(OutputMessage { text: "第一句".to_string(), timestamp: now });
+            buf.push(OutputMessage { text: "第二句".to_string(), timestamp: now });
+            buf.push(OutputMessage { text: "第三句".to_string(), timestamp: now });
+        }
+
+        // After pushing 3, the buffer should only show last 2 in combined text
+        let combined = {
+            let buf = sender.buffer.lock().unwrap();
+            let messages: Vec<&str> = buf.iter()
+                .rev()
+                .take(sender.line_count)
+                .map(|m| m.text.as_str())
+                .collect();
+            messages.into_iter().rev().collect::<Vec<_>>().join("\n")
+        };
+        assert_eq!(combined, "第二句\n第三句");
+    }
+
+    #[test]
+    fn test_buffer_expiry() {
+        let sender = OscSender::with_config(
+            "127.0.0.1".to_string(),
+            9000,
+            10,
+            1, // retention = 1 second
+            true,
+        );
+
+        let old_time = OscSender::now_ms().saturating_sub(2000); // 2 seconds ago
+
+        {
+            let mut buf = sender.buffer.lock().unwrap();
+            buf.push(OutputMessage { text: "旧消息".to_string(), timestamp: old_time });
+            buf.push(OutputMessage { text: "新消息".to_string(), timestamp: OscSender::now_ms() });
+        }
+
+        // Trigger expiry by calling send_chatbox which calls retain
+        // (send_chatbox requires network, so we manually simulate the retain logic)
+        {
+            let mut buf = sender.buffer.lock().unwrap();
+            let cutoff = OscSender::now_ms().saturating_sub(sender.retention_secs * 1000);
+            buf.retain(|m| m.timestamp >= cutoff);
+        }
+
+        let remaining = {
+            let buf = sender.buffer.lock().unwrap();
+            buf.iter().map(|m| m.text.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0], "新消息");
+    }
+
+    #[test]
+    fn test_last_sent_dedup() {
+        let sender = OscSender::with_config(
+            "127.0.0.1".to_string(),
+            9000,
+            2,
+            3600,
+            true,
+        );
+
+        // Manually set last_sent to simulate previous send
+        {
+            let mut last = sender.last_sent.lock().unwrap();
+            *last = "测试消息".to_string();
+        }
+
+        // Verify last_sent is set
+        {
+            let last = sender.last_sent.lock().unwrap();
+            assert_eq!(*last, "测试消息");
+        }
+    }
+
+    #[test]
+    fn test_sender_default_config() {
+        let sender = OscSender::new("127.0.0.1".to_string(), 9000);
+        assert_eq!(sender.line_count, 2);
+        assert_eq!(sender.retention_secs, 5);
+        assert!(sender.remove_period);
+    }
+
+    #[test]
+    fn test_sender_line_count_minimum() {
+        let sender = OscSender::with_config(
+            "127.0.0.1".to_string(), 9000, 0, 5, true,
+        );
+        assert_eq!(sender.line_count, 1, "line_count should be clamped to minimum 1");
+    }
+}

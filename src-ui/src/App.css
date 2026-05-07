@@ -254,21 +254,6 @@ header h1 {
   font-style: italic;
 }
 
-.final-result {
-  background: #1a2a3a;
-  border: 1px solid #1565c0;
-}
-
-.final-result .label {
-  color: #64b5f6;
-}
-
-.final-result .text {
-  color: #bbdefb;
-  font-weight: 600;
-  white-space: pre-wrap;
-}
-
 .error-result {
   background: #3a1a1a;
   border: 1px solid #c62828;
@@ -280,28 +265,6 @@ header h1 {
 
 .error-result .text {
   color: #ffcdd2;
-}
-
-/* ---- Config Panel ---- */
-.config-panel {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 8px;
-  padding: 1.25rem;
-  margin-top: 1rem;
-}
-
-.config-panel h2 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0 0 0.75rem 0;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid #444;
-}
-
-.config-panel h2:not(:first-child) {
-  margin-top: 1.25rem;
 }
 
 .config-field {
@@ -461,16 +424,6 @@ header h1 {
   word-break: break-word;
 }
 
-.history-source {
-  padding: 0.1rem 0.4rem;
-  background: #444;
-  border-radius: 3px;
-  font-size: 0.75rem;
-  color: #aaa;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
 .history-empty {
   color: #888;
   font-style: italic;
@@ -504,20 +457,6 @@ h2 {
 }
 
 /* ---- Responsive ---- */
-/* ---- Test Recording Panel ---- */
-.test-recording-panel {
-  margin-top: 1rem;
-  background: #2a2a2a;
-  border-radius: 8px;
-  padding: 1rem;
-}
-
-.test-recording-panel h2 {
-  font-size: 1rem;
-  margin-bottom: 0.75rem;
-  color: #ccc;
-}
-
 .test-recording-controls {
   display: flex;
   gap: 0.75rem;
@@ -662,18 +601,6 @@ h2 {
 .log-level-error { color: #ef5350; }
 .log-module { color: #ab47bc; min-width: 60px; }
 .log-message { color: #ccc; flex: 1; }
-
-/* ---- Sentence items in results ---- */
-.sentences-list { margin-top: 0.5rem; }
-.sentence-item {
-  padding: 0.4rem 0.6rem;
-  margin: 0.25rem 0;
-  background: #1a3a2a;
-  border-left: 3px solid #4caf50;
-  border-radius: 4px;
-  color: #a5d6a7;
-  font-size: 0.9rem;
-}
 
 /* ---- History pagination ---- */
 .history-pagination {
