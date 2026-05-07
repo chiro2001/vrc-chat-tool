@@ -11,6 +11,7 @@ use vrc_chat_tool::state;
 
 mod e2e_server;
 mod history;
+mod commands;
 
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::thread;
@@ -176,16 +177,6 @@ fn delete_test_recording(filename: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_recent_logs() -> Vec<state::LogEntry> {
-    state::LOG_BUFFER.lock().unwrap().clone()
-}
-
-#[tauri::command]
-fn clear_logs() {
-    state::LOG_BUFFER.lock().unwrap().clear();
-}
-
-#[tauri::command]
 fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) -> Result<(), String> {
     state::SHOULD_STOP.store(false, Ordering::SeqCst);
 
@@ -267,73 +258,6 @@ fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) -> R
 }
 
 // --- Tauri Commands ---
-
-#[tauri::command]
-fn get_config() -> Option<config::AppConfig> {
-    state::CURRENT_CONFIG.lock().unwrap().clone()
-}
-
-#[tauri::command]
-fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(), String> {
-    let old_config = state::CURRENT_CONFIG.lock().unwrap().clone();
-    let hotkey_was_enabled = old_config.as_ref().map(|c| c.global_hotkey_enabled).unwrap_or(false);
-    let trigger_was_enabled = old_config.as_ref().map(|c| c.trigger_listener_enabled).unwrap_or(false);
-
-    if let Err(e) = config.save() {
-        return Err(format!("Failed to save config: {}", e));
-    }
-    *state::CURRENT_CONFIG.lock().unwrap() = Some(config.clone());
-
-    // Start or stop global hotkey based on new config
-    if config.global_hotkey_enabled && !hotkey_was_enabled {
-        hotkey::start(app.clone());
-    } else if !config.global_hotkey_enabled && hotkey_was_enabled {
-        hotkey::stop();
-    }
-
-    // Start or stop trigger listener based on config change
-    if config.trigger_listener_enabled && !trigger_was_enabled {
-        let can_start = config.trigger_stt_provider == "local_embedded" || !config.local_stt_url.is_empty();
-        if can_start {
-            log::info("main", "Trigger listener enabled, starting...");
-            trigger::start_trigger_listener(Arc::new(config.clone()));
-        }
-    } else if !config.trigger_listener_enabled && trigger_was_enabled {
-        log::info("main", "Trigger listener disabled, stopping...");
-        trigger::stop_capture();
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-fn reset_config() -> Result<config::AppConfig, String> {
-    let default_config = config::AppConfig::default();
-    if let Err(e) = default_config.save() {
-        return Err(format!("Failed to reset config: {}", e));
-    }
-    *state::CURRENT_CONFIG.lock().unwrap() = Some(default_config.clone());
-    Ok(default_config)
-}
-
-#[tauri::command]
-fn get_tencent_credentials() -> Result<config::TencentCredentials, String> {
-    let cfg = state::CURRENT_CONFIG.lock().unwrap();
-    let credentials_file = cfg.as_ref()
-        .map(|c| c.tencent_credentials_file.clone())
-        .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
-    Ok(config::TencentCredentials::load(&credentials_file))
-}
-
-#[tauri::command]
-fn save_tencent_credentials(app_id: String, secret_id: String, secret_key: String) -> Result<(), String> {
-    let cfg = state::CURRENT_CONFIG.lock().unwrap();
-    let credentials_file = cfg.as_ref()
-        .map(|c| c.tencent_credentials_file.clone())
-        .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
-    let creds = config::TencentCredentials { app_id, secret_id, secret_key };
-    creds.save(&credentials_file).map_err(|e| format!("Failed to save: {}", e))
-}
 
 #[tauri::command]
 fn list_audio_devices() -> Result<Vec<audio::capture::AudioDeviceInfo>, String> {
@@ -851,19 +775,19 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_config,
-            save_config,
-            reset_config,
-            get_tencent_credentials,
-            save_tencent_credentials,
+            commands::config::get_config,
+            commands::config::save_config,
+            commands::config::reset_config,
+            commands::config::get_tencent_credentials,
+            commands::config::save_tencent_credentials,
             list_audio_devices,
             start_recording,
             stop_recording,
             save_test_recording,
             list_test_recordings,
             delete_test_recording,
-            get_recent_logs,
-            clear_logs,
+            commands::logs::get_recent_logs,
+            commands::logs::clear_logs,
             start_test_recording,
             get_recognition_history,
             clear_recognition_history,
