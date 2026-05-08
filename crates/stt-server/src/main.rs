@@ -49,8 +49,15 @@ fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Run) {
         Commands::Run => {
+            let backend_name = if config.asr.backend == "hybrid" {
+                format!("Hybrid ({})", config.asr.streaming_model)
+            } else {
+                "Sherpa-ONNX (transducer)".into()
+            };
+
             tracing::info!("{}", "=".repeat(58));
-            tracing::info!("  Streaming STT Server — Sherpa-ONNX");
+            tracing::info!("  Streaming STT Server");
+            tracing::info!("  Backend:            {}", backend_name);
             tracing::info!(
                 "  Host:               {}",
                 config.server.host

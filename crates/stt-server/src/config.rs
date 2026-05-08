@@ -54,6 +54,29 @@ pub struct AsrConfig {
     /// ONNX execution provider (e.g., "cpu", "cuda")
     #[serde(default)]
     pub provider: Option<String>,
+
+    // --- Hybrid engine fields ---
+    /// Backend to use: "sherpa-onnx" (traditional) or "hybrid" (zipformer + SenseVoice)
+    #[serde(default = "default_backend")]
+    pub backend: String,
+    /// Streaming model type: "transducer" or "zipformer-small-ctc"
+    #[serde(default = "default_streaming_model")]
+    pub streaming_model: String,
+    /// Path to Zipformer CTC model directory (used when streaming_model == "zipformer-small-ctc")
+    #[serde(default = "default_ctc_model_dir")]
+    pub ctc_model_dir: PathBuf,
+    /// Path to SenseVoice model directory
+    #[serde(default = "default_sv_model_dir")]
+    pub sv_model_dir: PathBuf,
+    /// SenseVoice model filename (relative to sv_model_dir)
+    #[serde(default = "default_sv_model")]
+    pub sv_model: String,
+    /// SenseVoice tokens filename (relative to sv_model_dir)
+    #[serde(default = "default_sv_tokens")]
+    pub sv_tokens: String,
+    /// Language for SenseVoice (e.g., "zh", "auto")
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 fn default_num_threads() -> i32 {
@@ -61,6 +84,27 @@ fn default_num_threads() -> i32 {
 }
 fn default_sample_rate() -> i32 {
     16000
+}
+fn default_backend() -> String {
+    "sherpa-onnx".into()
+}
+fn default_streaming_model() -> String {
+    "transducer".into()
+}
+fn default_ctc_model_dir() -> PathBuf {
+    PathBuf::from("./models/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01")
+}
+fn default_sv_model_dir() -> PathBuf {
+    PathBuf::from("./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17")
+}
+fn default_sv_model() -> String {
+    "model.int8.onnx".into()
+}
+fn default_sv_tokens() -> String {
+    "tokens.txt".into()
+}
+fn default_language() -> String {
+    "zh".into()
 }
 
 /// VAD (Voice Activity Detection) configuration.
@@ -227,6 +271,12 @@ impl Config {
         if config.asr.model_dir.is_relative() {
             config.asr.model_dir = config_dir.join(&config.asr.model_dir);
         }
+        if config.asr.ctc_model_dir.is_relative() {
+            config.asr.ctc_model_dir = config_dir.join(&config.asr.ctc_model_dir);
+        }
+        if config.asr.sv_model_dir.is_relative() {
+            config.asr.sv_model_dir = config_dir.join(&config.asr.sv_model_dir);
+        }
         if config.punctuation.enabled && config.punctuation.model_dir.is_relative() {
             config.punctuation.model_dir = config_dir.join(&config.punctuation.model_dir);
         }
@@ -264,6 +314,26 @@ impl Config {
         self.asr_model_path().join(&self.asr.tokens)
     }
 
+    /// Full path to the CTC model file (model.int8.onnx).
+    pub fn resolved_ctc_model(&self) -> PathBuf {
+        self.asr.ctc_model_dir.join("model.int8.onnx")
+    }
+
+    /// Full path to the CTC tokens file (tokens.txt).
+    pub fn resolved_ctc_tokens(&self) -> PathBuf {
+        self.asr.ctc_model_dir.join("tokens.txt")
+    }
+
+    /// Full path to the SenseVoice model file.
+    pub fn resolved_sv_model(&self) -> PathBuf {
+        self.asr.sv_model_dir.join(&self.asr.sv_model)
+    }
+
+    /// Full path to the SenseVoice tokens file.
+    pub fn resolved_sv_tokens(&self) -> PathBuf {
+        self.asr.sv_model_dir.join(&self.asr.sv_tokens)
+    }
+
     /// Resolved path to the punctuation model, if enabled.
     pub fn resolved_punctuation_model(&self) -> Option<PathBuf> {
         if !self.punctuation.enabled || self.punctuation.model_name.is_empty() {
@@ -283,14 +353,66 @@ impl Config {
 
     /// Validate that all required model files exist.
     pub fn validate_model_paths(&self) -> Result<()> {
-        for (label, path) in &[
-            ("encoder", self.resolved_encoder()),
-            ("decoder", self.resolved_decoder()),
-            ("joiner", self.resolved_joiner()),
-            ("tokens", self.resolved_tokens()),
-        ] {
-            if !path.exists() {
-                anyhow::bail!("ASR model file not found: {} ({})", path.display(), label);
+        if self.asr.backend == "hybrid" {
+            // Validate streaming model paths
+            if self.asr.streaming_model == "zipformer-small-ctc" {
+                for (label, path) in &[
+                    ("ctc_model", self.resolved_ctc_model()),
+                    ("ctc_tokens", self.resolved_ctc_tokens()),
+                ] {
+                    if !path.exists() {
+                        anyhow::bail!(
+                            "CTC model file not found: {} ({})",
+                            path.display(),
+                            label
+                        );
+                    }
+                }
+            } else {
+                // Transducer paths for hybrid (when not using CTC)
+                for (label, path) in &[
+                    ("encoder", self.resolved_encoder()),
+                    ("decoder", self.resolved_decoder()),
+                    ("joiner", self.resolved_joiner()),
+                    ("tokens", self.resolved_tokens()),
+                ] {
+                    if !path.exists() {
+                        anyhow::bail!(
+                            "ASR model file not found: {} ({})",
+                            path.display(),
+                            label
+                        );
+                    }
+                }
+            }
+            // Validate SenseVoice paths
+            for (label, path) in &[
+                ("sv_model", self.resolved_sv_model()),
+                ("sv_tokens", self.resolved_sv_tokens()),
+            ] {
+                if !path.exists() {
+                    anyhow::bail!(
+                        "SenseVoice model file not found: {} ({})",
+                        path.display(),
+                        label
+                    );
+                }
+            }
+        } else {
+            // Traditional sherpa-onnx backend validation
+            for (label, path) in &[
+                ("encoder", self.resolved_encoder()),
+                ("decoder", self.resolved_decoder()),
+                ("joiner", self.resolved_joiner()),
+                ("tokens", self.resolved_tokens()),
+            ] {
+                if !path.exists() {
+                    anyhow::bail!(
+                        "ASR model file not found: {} ({})",
+                        path.display(),
+                        label
+                    );
+                }
             }
         }
         if self.punctuation.enabled {

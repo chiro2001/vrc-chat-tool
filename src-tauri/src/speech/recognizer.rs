@@ -6,6 +6,7 @@ pub enum Recognizer {
     Tencent(crate::speech::streaming::StreamingRecognizer),
     Local(crate::speech::local::LocalRecognizer),
     LocalEmbedded(crate::speech::local_embedded::LocalEmbeddedRecognizer),
+    LocalEmbeddedHybrid(crate::speech::local_embedded::LocalEmbeddedHybridRecognizer),
 }
 
 impl Recognizer {
@@ -24,6 +25,9 @@ impl Recognizer {
                 r.recognize_pcm_stream(pcm_rx, stop_signal, on_partial, on_sentence).await
             }
             Recognizer::LocalEmbedded(r) => {
+                r.recognize_pcm_stream(pcm_rx, stop_signal, on_partial, on_sentence).await
+            }
+            Recognizer::LocalEmbeddedHybrid(r) => {
                 r.recognize_pcm_stream(pcm_rx, stop_signal, on_partial, on_sentence).await
             }
         }
