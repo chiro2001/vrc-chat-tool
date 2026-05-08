@@ -99,7 +99,7 @@ pub fn get_recent(limit: usize) -> Vec<HistoryEntry> {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
-    match stmt.query_map(params![limit as i64], |row| {
+    let rows: Vec<HistoryEntry> = match stmt.query_map(params![limit as i64], |row| {
         Ok(HistoryEntry {
             id: row.get(0)?,
             timestamp: row.get(1)?,
@@ -108,8 +108,10 @@ pub fn get_recent(limit: usize) -> Vec<HistoryEntry> {
         })
     }) {
         Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-        Err(_) => Vec::new(),
-    }
+        Err(_) => return Vec::new(),
+    };
+    drop(stmt);
+    rows
 }
 
 pub fn clear_all() {
