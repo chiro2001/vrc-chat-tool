@@ -13,23 +13,24 @@ static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new
         }
     }
     let conn = Connection::open(&db_path).expect("Failed to open history database");
-    conn.busy_timeout(std::time::Duration::from_secs(5))
-        .expect("Failed to set busy timeout");
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .expect("Failed to set WAL mode");
-    conn.execute_batch(
+    conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
+    conn.pragma_update(None, "journal_mode", "WAL").ok();
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS recognition_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,
             text TEXT NOT NULL,
             source TEXT NOT NULL DEFAULT 'asr'
-        );
-        CREATE TABLE IF NOT EXISTS settings (
+        )",
+        [],
+    ).ok();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
-        );",
-    )
-    .expect("Failed to create tables");
+        )",
+        [],
+    ).ok();
     Mutex::new(conn)
 });
 
