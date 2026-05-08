@@ -1,0 +1,10 @@
+# Cross-compilation configuration for Windows targets.
+# Works on both native Windows and WSL cross-compilation.
+
+[target.x86_64-pc-windows-msvc]
+# Static CRT: required for sherpa-onnx-sys prebuilt MSVC libs (/MT)
+# Also avoids requiring VC++ redistributable at runtime
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
