@@ -6,6 +6,8 @@ use std::sync::Mutex;
 static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new(|| {
     let db_path = get_db_path();
     let conn = Connection::open(&db_path).expect("Failed to open history database");
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .expect("Failed to set busy timeout");
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS recognition_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
