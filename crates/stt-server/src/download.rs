@@ -67,6 +67,51 @@ pub fn download_models(config: &Config, force: bool, no_punct: bool) -> Result<(
         force,
     )?;
 
+    // --- Hybrid models (CTC zipformer + SenseVoice) ---
+    if config.asr.backend == "hybrid" {
+        // Download CTC zipformer model if configured
+        if config.asr.streaming_model == "zipformer-small-ctc" {
+            let ctc_dir = &config.asr.ctc_model_dir;
+            let ctc_model_name = ctc_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01");
+            let ctc_url = format!(
+                "{}/asr-models/{}.tar.bz2",
+                RELEASES_BASE, ctc_model_name,
+            );
+            std::fs::create_dir_all(ctc_dir.parent().unwrap_or(ctc_dir))
+                .context("Failed to create CTC model directory")?;
+            download_single_model(
+                &ctc_url,
+                ctc_model_name,
+                ctc_dir.parent().unwrap_or(ctc_dir),
+                &["model.int8.onnx", "tokens.txt"],
+                force,
+            )?;
+        }
+
+        // Download SenseVoice model
+        let sv_dir = &config.asr.sv_model_dir;
+        let sv_model_name = sv_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17");
+        let sv_url = format!(
+            "{}/asr-models/{}.tar.bz2",
+            RELEASES_BASE, sv_model_name,
+        );
+        std::fs::create_dir_all(sv_dir.parent().unwrap_or(sv_dir))
+            .context("Failed to create SenseVoice model directory")?;
+        download_single_model(
+            &sv_url,
+            sv_model_name,
+            sv_dir.parent().unwrap_or(sv_dir),
+            &[&config.asr.sv_model, &config.asr.sv_tokens],
+            force,
+        )?;
+    }
+
     // --- Punctuation model ---
     if !no_punct
         && config.punctuation.enabled
