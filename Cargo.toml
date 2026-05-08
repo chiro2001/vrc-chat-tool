@@ -14,4 +14,3 @@ license = "MIT"
 [profile.dev]
 debug = 0
 opt-level = 1
-lto = "thin"
