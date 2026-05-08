@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new(|| {
+fn open_or_memory() -> Connection {
     let db_path = get_db_path();
     if db_path.exists() {
         if let Ok(meta) = std::fs::metadata(&db_path) {
@@ -12,9 +12,31 @@ static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new
             }
         }
     }
-    let conn = Connection::open(&db_path).expect("Failed to open history database");
-    conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
-    conn.pragma_update(None, "journal_mode", "WAL").ok();
+    if let Ok(conn) = Connection::open(&db_path) {
+        conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
+        conn.pragma_update(None, "journal_mode", "WAL").ok();
+        let ok = conn.execute(
+            "CREATE TABLE IF NOT EXISTS recognition_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                text TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'asr'
+            )",
+            [],
+        ).is_ok();
+        if ok {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )",
+                [],
+            ).ok();
+            return conn;
+        }
+    }
+    eprintln!("[history] file-based SQLite unavailable, falling back to in-memory");
+    let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
     conn.execute(
         "CREATE TABLE IF NOT EXISTS recognition_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,15 +45,19 @@ static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new
             source TEXT NOT NULL DEFAULT 'asr'
         )",
         [],
-    ).ok();
+    ).unwrap();
     conn.execute(
         "CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         )",
         [],
-    ).ok();
-    Mutex::new(conn)
+    ).unwrap();
+    conn
+}
+
+static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new(|| {
+    Mutex::new(open_or_memory())
 });
 
 fn get_db_path() -> PathBuf {
@@ -63,23 +89,27 @@ pub fn add_entry(text: &str, source: &str) {
 }
 
 pub fn get_recent(limit: usize) -> Vec<HistoryEntry> {
-    let conn = DB.lock().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, timestamp, text, source FROM recognition_history ORDER BY id DESC LIMIT ?1",
-        )
-        .unwrap();
-    stmt.query_map(params![limit as i64], |row| {
+    let conn = match DB.lock() {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT id, timestamp, text, source FROM recognition_history ORDER BY id DESC LIMIT ?1",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    match stmt.query_map(params![limit as i64], |row| {
         Ok(HistoryEntry {
             id: row.get(0)?,
             timestamp: row.get(1)?,
             text: row.get(2)?,
             source: row.get(3)?,
         })
-    })
-    .unwrap()
-    .filter_map(|r| r.ok())
-    .collect()
+    }) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 pub fn clear_all() {
