@@ -5,9 +5,18 @@ use std::sync::Mutex;
 
 static DB: once_cell::sync::Lazy<Mutex<Connection>> = once_cell::sync::Lazy::new(|| {
     let db_path = get_db_path();
+    if db_path.exists() {
+        if let Ok(meta) = std::fs::metadata(&db_path) {
+            if meta.len() == 0 {
+                let _ = std::fs::remove_file(&db_path);
+            }
+        }
+    }
     let conn = Connection::open(&db_path).expect("Failed to open history database");
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .expect("Failed to set busy timeout");
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .expect("Failed to set WAL mode");
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS recognition_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
