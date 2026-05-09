@@ -1,0 +1,37 @@
+# Auto-detect text files, normalize to LF on commit, CRLF on checkout (Windows)
+* text=auto
+
+# .gitattributes must always be LF, regardless of platform
+.gitattributes text eol=lf
+
+# Explicit text files (just to be safe)
+*.rs text
+*.ts text
+*.tsx text
+*.js text
+*.json text
+*.yaml text
+*.yml text
+*.toml text
+*.css text
+*.html text
+*.md text
+*.py text
+*.ps1 text
+*.cfg text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.onnx binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.zip binary
+*.tar.gz binary
