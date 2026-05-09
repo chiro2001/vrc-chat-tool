@@ -88,6 +88,7 @@ export default function ConfigModal({
               <option value="tencent">{t("config.providerTencent")}</option>
               <option value="local">{t("config.providerLocal")}</option>
               <option value="local_embedded">{t("config.providerLocalEmbedded")}</option>
+              <option value="local_embedded_hybrid">{t("config.providerLocalEmbeddedHybrid")}</option>
             </select>
           </div>
 
@@ -97,7 +98,7 @@ export default function ConfigModal({
               <label>{t("config.localSttUrl")}</label>
               <input type="text" value={config.local_stt_url} onChange={(e) => updateConfig("local_stt_url", e.target.value)} />
             </div>
-          ) : config.asr_provider === "local_embedded" ? (
+          ) : config.asr_provider === "local_embedded" || config.asr_provider === "local_embedded_hybrid" ? (
             <>
               <div className="config-field">
                 <label>模型选择</label>
@@ -263,6 +264,7 @@ export default function ConfigModal({
               <select value={config.trigger_stt_provider} onChange={(e) => updateConfig("trigger_stt_provider", e.target.value)}>
                 <option value="local">{t("config.triggerSttProviderLocal")}</option>
                 <option value="local_embedded">{t("config.triggerSttProviderLocalEmbedded")}</option>
+                <option value="local_embedded_hybrid">{t("config.triggerSttProviderLocalEmbeddedHybrid")}</option>
               </select>
             </div>
           )}

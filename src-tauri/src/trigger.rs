@@ -181,7 +181,7 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
     let stt_config_path = config.stt_config_path.clone();
     let trigger_provider = config.trigger_stt_provider.clone();
 
-    if trigger_provider != "local_embedded" && local_url.is_empty() {
+    if trigger_provider != "local_embedded" && trigger_provider != "local_embedded_hybrid" && local_url.is_empty() {
         crate::log::info("trigger", "No local STT URL configured, trigger listener disabled");
         TRIGGER_STATE.lock().unwrap().active = false;
         return;
@@ -322,6 +322,88 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                     }
                     None => {
                         crate::log::debug("trigger", "PCM channel closed, exiting local STT loop");
+                        break;
+                    }
+                }
+            }
+        } else if trigger_provider == "local_embedded_hybrid" {
+            // --- Local embedded hybrid STT path (Zipformer + SenseVoice) ---
+            use crate::speech::local_embedded::LocalEmbeddedHybridRecognizer;
+            crate::log::info("trigger", &format!(
+                "Initializing hybrid STT from: {}",
+                stt_config_path
+            ));
+
+            let stt_cfg = match SttConfig::from_file(&stt_config_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    crate::log::error("trigger", &format!("Failed to load STT config: {}", e));
+                    TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
+                    stop_signal.store(true, Ordering::SeqCst);
+                    TRIGGER_STATE.lock().unwrap().active = false;
+                    return;
+                }
+            };
+
+            let engine = match LocalEmbeddedHybridRecognizer::new(stt_cfg) {
+                Ok(r) => {
+                    TRIGGER_STATE.lock().unwrap().stt_status = "connected".to_string();
+                    crate::log::info("trigger", "Hybrid STT engine ready");
+                    r
+                }
+                Err(e) => {
+                    crate::log::error("trigger", &format!("Failed to init hybrid STT: {}", e));
+                    TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
+                    stop_signal.store(true, Ordering::SeqCst);
+                    TRIGGER_STATE.lock().unwrap().active = false;
+                    return;
+                }
+            };
+
+            let mut hb_stream = engine.create_stream();
+
+            loop {
+                match pcm_rx.blocking_recv() {
+                    Some(chunk) => {
+                        let samples = LocalEmbeddedHybridRecognizer::i16_to_f32(&chunk);
+                        if !samples.is_empty() {
+                            engine.decode(&mut hb_stream, &samples);
+
+                            if engine.is_endpoint(&hb_stream) {
+                                if hb_stream.refining {
+                                    engine.refine(&mut hb_stream);
+                                }
+                                let text = engine.get_text(&hb_stream);
+                                let trimmed = text.trim().to_string();
+                                if !trimmed.is_empty() {
+                                    crate::log::debug("trigger", &format!("STT heard: '{}'", trimmed));
+
+                                    {
+                                        let mut state = TRIGGER_STATE.lock().unwrap();
+                                        state.heard_texts.push(trimmed.clone());
+                                        if state.heard_texts.len() > MAX_HEARD_TEXTS {
+                                            state.heard_texts.remove(0);
+                                        }
+                                    }
+
+                                    if matches_trigger(&trimmed, &start_phrase) {
+                                        crate::log::info("trigger", &format!("START detected: '{}'", trimmed));
+                                        let mut state = TRIGGER_STATE.lock().unwrap();
+                                        state.detected = true;
+                                        state.last_trigger_text = "start".to_string();
+                                    } else if matches_trigger(&trimmed, &stop_phrase) {
+                                        crate::log::info("trigger", &format!("STOP detected: '{}'", trimmed));
+                                        let mut state = TRIGGER_STATE.lock().unwrap();
+                                        state.detected = true;
+                                        state.last_trigger_text = "stop".to_string();
+                                    }
+                                }
+                                engine.reset(&mut hb_stream);
+                            }
+                        }
+                    }
+                    None => {
+                        crate::log::debug("trigger", "PCM channel closed, exiting hybrid STT loop");
                         break;
                     }
                 }

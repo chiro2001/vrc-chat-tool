@@ -124,7 +124,8 @@ function App() {
 
   // Check STT model status when local_embedded is selected
   useEffect(() => {
-    if (config.asr_provider === "local_embedded" || config.trigger_stt_provider === "local_embedded") {
+      if (config.asr_provider === "local_embedded" || config.asr_provider === "local_embedded_hybrid"
+       || config.trigger_stt_provider === "local_embedded" || config.trigger_stt_provider === "local_embedded_hybrid") {
       invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path })
         .then((status) => {
           setModelStatus(status);

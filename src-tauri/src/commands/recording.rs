@@ -90,6 +90,15 @@ pub(crate) fn start_recording_inner(
                             e,
                         ))?;
                     speech::recognizer::Recognizer::LocalEmbedded(engine_cfg)
+                } else if cfg.asr_provider == "local_embedded_hybrid" {
+                    let engine_cfg = speech::local_embedded::LocalEmbeddedHybridRecognizer::from_config_file(&cfg.stt_config_path)
+                        .map_err(|e| anyhow::anyhow!(
+                            "无法加载混合 STT 模型: {}\n\n请检查:\n\
+                             1. stt-config.yaml 中 backend 是否设为 \"hybrid\"\n\
+                             2. 模型文件是否存在（可在设置中下载模型）",
+                            e,
+                        ))?;
+                    speech::recognizer::Recognizer::LocalEmbeddedHybrid(engine_cfg)
             } else {
                 let c = tencent_creds.as_ref().unwrap();
                 speech::recognizer::Recognizer::Tencent(

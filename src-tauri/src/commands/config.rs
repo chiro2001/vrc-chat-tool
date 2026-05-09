@@ -28,7 +28,7 @@ pub fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(
     }
 
     if config.trigger_listener_enabled && !trigger_was_enabled {
-        let can_start = config.trigger_stt_provider == "local_embedded" || !config.local_stt_url.is_empty();
+        let can_start = config.trigger_stt_provider == "local_embedded" || config.trigger_stt_provider == "local_embedded_hybrid" || !config.local_stt_url.is_empty();
         if can_start {
             log::info("main", "Trigger listener enabled, starting...");
             trigger::start_trigger_listener(Arc::new(config.clone()));
