@@ -1,7 +1,7 @@
 ﻿/// Overlay window — transparent always-on-top display showing real-time recognition.
 import { useState, useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { appWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { appWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import "./overlay.css";
 
@@ -51,6 +51,19 @@ function Overlay() {
     };
   }, []);
 
+  // Auto-resize window to fit content
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const h = el.scrollHeight;
+      appWindow.setSize(new PhysicalSize(420, Math.max(120, h))).catch(() => {});
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     listen<string>("recording-started", () => { setStatus("recording"); setCurrentPartial(""); setLastError(""); }).then(fn => unlisteners.push(fn));
@@ -65,7 +78,7 @@ function Overlay() {
   const st = () => { switch(status) { case "recording": return "录音中..."; case "recognizing": return "识别中..."; case "error": return "错误"; default: return ""; } };
 
   return (
-    <div className="overlay-container">
+    <div className="overlay-container" ref={containerRef}>
       {status !== "idle" && (
         <div className={`overlay-status status-${status}`}>
           <span className="status-dot" />
