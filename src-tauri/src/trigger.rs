@@ -7,8 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 use crate::config::AppConfig;
 use crate::audio::capture::AudioCapture;
-use crate::speech::local_embedded::LocalEmbeddedRecognizer;
-use stt_server::Config as SttConfig;
+use crate::speech::local_embedded::LocalEmbeddedHybridRecognizer;
 
 // --- Trigger State ---
 // Consolidates shared state into a single struct instead of 9 separate statics.
@@ -183,7 +182,6 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
     let local_url = config.local_stt_url.clone();
     let stt_config_path = config.stt_config_path.clone();
     let trigger_provider = config.trigger_stt_provider.clone();
-    let asr_backend = config.asr_backend.clone();
 
     if trigger_provider != "local_embedded" && local_url.is_empty() {
         crate::log::info("trigger", "No local STT URL configured, trigger listener disabled");
@@ -261,15 +259,15 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                 }
             };
 
-            if asr_backend == "hybrid" {
-                // --- Local embedded hybrid STT path (Zipformer + SenseVoice) ---
-                use crate::speech::local_embedded::LocalEmbeddedHybridRecognizer;
-                crate::log::info("trigger", &format!(
-                    "Initializing hybrid STT from: {}",
-                    stt_config_path
-                ));
+            // Always use hybrid engine (Zipformer CTC + SenseVoice)
+use crate::speech::local_embedded::LocalEmbeddedHybridRecognizer;
+use stt_server::Config as SttConfig;
+            crate::log::info("trigger", &format!(
+                "Initializing hybrid STT from: {}",
+                stt_config_path
+            ));
 
-                let engine = match LocalEmbeddedHybridRecognizer::new(stt_cfg) {
+            let engine = match LocalEmbeddedHybridRecognizer::new(stt_cfg) {
                     Ok(r) => {
                         TRIGGER_STATE.lock().unwrap().stt_status = "connected".to_string();
                         crate::log::info("trigger", "Hybrid STT engine ready");
@@ -331,75 +329,6 @@ pub fn start_trigger_listener(config: Arc<AppConfig>) {
                             break;
                         }
                     }
-                }
-            } else {
-                // --- Local embedded STT path (standard transducer) ---
-                crate::log::info("trigger", &format!(
-                    "Initializing local embedded STT from: {}",
-                    stt_config_path
-                ));
-
-                let recognizer = match LocalEmbeddedRecognizer::new(stt_cfg) {
-                    Ok(r) => {
-                        TRIGGER_STATE.lock().unwrap().stt_status = "connected".to_string();
-                        crate::log::info("trigger", "Local embedded STT engine ready");
-                        r
-                    }
-                    Err(e) => {
-                        crate::log::error("trigger", &format!("Failed to init local STT: {}", e));
-                        TRIGGER_STATE.lock().unwrap().stt_status = format!("error: {}", e);
-                        stop_signal.store(true, Ordering::SeqCst);
-                        TRIGGER_STATE.lock().unwrap().active = false;
-                        return;
-                    }
-                };
-
-                let stream = recognizer.create_stream();
-
-                loop {
-                    match pcm_rx.blocking_recv() {
-                        Some(chunk) => {
-                            let samples = LocalEmbeddedRecognizer::i16_to_f32(&chunk);
-                            if !samples.is_empty() {
-                                recognizer.decode(&stream, &samples);
-
-                                if recognizer.is_endpoint(&stream) {
-                                    if let Some(text) = recognizer.get_text(&stream) {
-                                        let trimmed = text.trim();
-                                        if !trimmed.is_empty() {
-                                            crate::log::debug("trigger", &format!("STT heard: '{}'", trimmed));
-
-                                            {
-                                                let mut state = TRIGGER_STATE.lock().unwrap();
-                                                state.heard_texts.push(trimmed.to_string());
-                                                if state.heard_texts.len() > MAX_HEARD_TEXTS {
-                                                    state.heard_texts.remove(0);
-                                                }
-                                            }
-
-                                            if matches_trigger(trimmed, &start_phrase) {
-                                                crate::log::info("trigger", &format!("START detected: '{}'", trimmed));
-                                                let mut state = TRIGGER_STATE.lock().unwrap();
-                                                state.detected = true;
-                                                state.last_trigger_text = "start".to_string();
-                                            } else if matches_trigger(trimmed, &stop_phrase) {
-                                                crate::log::info("trigger", &format!("STOP detected: '{}'", trimmed));
-                                                let mut state = TRIGGER_STATE.lock().unwrap();
-                                                state.detected = true;
-                                                state.last_trigger_text = "stop".to_string();
-                                            }
-                                        }
-                                    }
-                                    recognizer.reset(&stream);
-                                }
-                            }
-                        }
-                        None => {
-                            crate::log::debug("trigger", "PCM channel closed, exiting local STT loop");
-                            break;
-                        }
-                    }
-                }
             }
         } else {
             // --- Remote STT (WebSocket) path ---

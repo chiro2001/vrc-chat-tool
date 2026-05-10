@@ -57,69 +57,9 @@ export default function ProviderCard({
     <div className="provider-card">
       {provider === "local_embedded" && (
         <div className="provider-card-content">
-          {/* Engine type - clickable radio buttons */}
-          <div className="provider-card-row">
-            <span className="provider-card-label">{t("config.backend")}</span>
-            <span className="provider-card-engine">
-              <label className={`engine-option ${config.asr_backend === "sherpa-onnx" ? "active" : ""}`}
-                onClick={async () => {
-                  if (config.asr_backend === "sherpa-onnx") return;
-                  updateConfig("asr_backend", "sherpa-onnx");
-                  try {
-                    await invoke("set_stt_backend", {
-                      sttConfigPath: config.stt_config_path,
-                      backend: "sherpa-onnx",
-                      provider: null,
-                    });
-                    // Auto-select first compatible model
-                    const firstModel = availableModels?.find(m => m.backend === "sherpa-onnx");
-                    if (firstModel) {
-                      if (setCurrentModelName) setCurrentModelName(firstModel.name);
-                      await invoke("set_stt_model", { sttConfigPath: config.stt_config_path, modelName: firstModel.name });
-                    }
-                    const status = await invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path });
-                    if (setModelStatus) setModelStatus(status);
-                    if (setCurrentModelName && !firstModel && status) setCurrentModelName(status.model_name);
-                  } catch (err) {
-                    console.error("Failed to switch backend:", err);
-                  }
-                }}>
-                <span className="engine-radio" /> {t("config.backendStandard")}
-              </label>
-              <label className={`engine-option ${config.asr_backend === "hybrid" ? "active" : ""}`}
-                onClick={async () => {
-                  if (config.asr_backend === "hybrid") return;
-                  updateConfig("asr_backend", "hybrid");
-                  try {
-                    await invoke("set_stt_backend", {
-                      sttConfigPath: config.stt_config_path,
-                      backend: "hybrid",
-                      provider: null,
-                    });
-                    // Auto-select first compatible model
-                    const firstModel = availableModels?.find(m => m.backend === "hybrid");
-                    if (firstModel) {
-                      if (setCurrentModelName) setCurrentModelName(firstModel.name);
-                      await invoke("set_stt_model", { sttConfigPath: config.stt_config_path, modelName: firstModel.name });
-                    }
-                    const status = await invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path });
-                    if (setModelStatus) setModelStatus(status);
-                    if (setCurrentModelName && !firstModel && status) setCurrentModelName(status.model_name);
-                  } catch (err) {
-                    console.error("Failed to switch backend:", err);
-                  }
-                }}>
-                <span className="engine-radio" /> {t("config.backendHybrid")}
-              </label>
-            </span>
-          </div>
-
-          {/* Engine hint */}
-          <div className="provider-card-row">
-            <span className="provider-card-label" />
-            <span className="engine-hint">{t("config.backendHint")}</span>
-          </div>
-
+          {/* Only show card content when model is not ready */}
+          {modelStatus && modelStatus.exists ? null : (
+            <>
           {/* Model selector */}
           {availableModels && availableModels.length > 0 && (
             <div className="provider-card-row">
@@ -227,6 +167,8 @@ export default function ProviderCard({
                 {t("config.title")} →
               </button>
             </div>
+          )}
+            </>
           )}
         </div>
       )}

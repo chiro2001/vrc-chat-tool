@@ -50,50 +50,9 @@ pub struct ModelFiles {
 
 /// Registry of supported models for download.
 pub const SUPPORTED_MODELS: &[AvailableModel] = &[
-    // ── Standard backend (sherpa-onnx / transducer) ──
-    AvailableModel {
-        name: "sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23",
-        display_name: "中文 Zipformer 14M (标准) — ~74 MB",
-        size_bytes: 74_004_050,
-        backend: "sherpa-onnx",
-        sv_model: None,
-        files: ModelFiles {
-            encoder: "encoder-epoch-99-avg-1.onnx",
-            decoder: "decoder-epoch-99-avg-1.onnx",
-            joiner: "joiner-epoch-99-avg-1.onnx",
-            tokens: "tokens.txt",
-        },
-    },
-    AvailableModel {
-        name: "sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23-mobile",
-        display_name: "中文 Zipformer 14M (轻量/CPU) — ~52 MB",
-        size_bytes: 54_250_000,
-        backend: "sherpa-onnx",
-        sv_model: None,
-        files: ModelFiles {
-            encoder: "encoder-epoch-99-avg-1.int8.onnx",
-            decoder: "decoder-epoch-99-avg-1.int8.onnx",
-            joiner: "joiner-epoch-99-avg-1.int8.onnx",
-            tokens: "tokens.txt",
-        },
-    },
-    AvailableModel {
-        name: "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
-        display_name: "中英双语 Zipformer — ~72 MB",
-        size_bytes: 72_000_000,
-        backend: "sherpa-onnx",
-        sv_model: None,
-        files: ModelFiles {
-            encoder: "encoder-epoch-99-avg-1.onnx",
-            decoder: "decoder-epoch-99-avg-1.onnx",
-            joiner: "joiner-epoch-99-avg-1.onnx",
-            tokens: "tokens.txt",
-        },
-    },
-    // ── Hybrid backend (streaming + SenseVoice refinement) ──
     AvailableModel {
         name: "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01",
-        display_name: "混合 CTC int8 [推荐] — ~176 MB",
+        display_name: "CTC int8 [推荐] — ~176 MB",
         size_bytes: 21_000_000 + 155_000_000,
         backend: "hybrid",
         sv_model: Some(SvModelInfo {
