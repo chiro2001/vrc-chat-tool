@@ -9,8 +9,8 @@ body {
   background: transparent;
   font-family: "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
-  -webkit-app-region: no-drag;
   user-select: none;
+  margin: 0;
 }
 
 .overlay-container {
@@ -24,6 +24,7 @@ body {
   flex-direction: column;
   gap: 0.35rem;
   cursor: grab;
+  -webkit-app-region: drag;
 }
 
 .overlay-idle {

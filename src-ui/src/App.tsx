@@ -426,17 +426,6 @@ function App() {
         <h1>{t("app.title")}</h1>
         <div style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center", flexShrink: 0 }}>
           <button
-            className={`test-modal-trigger${overlayVisible ? " kb-active" : ""}`}
-            onClick={async () => {
-              try {
-                const visible = await invoke<boolean>("toggle_overlay_window");
-                setOverlayVisible(visible);
-              } catch {}
-            }}
-          >
-            浮窗
-          </button>
-          <button
             onClick={toggleLang}
             style={{ padding: "0.2rem 0.5rem", background: "#444", color: "#ccc", border: "1px solid #555", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem" }}
             title="Switch language / 切换语言"
@@ -498,6 +487,17 @@ function App() {
               <span className="stt-text">{getSttStatusText(sttStatus)}</span>
             </div>
           )}
+          <button
+            className={`test-modal-trigger${overlayVisible ? " kb-active" : ""}`}
+            onClick={async () => {
+              try {
+                const visible = await invoke<boolean>("toggle_overlay_window");
+                setOverlayVisible(visible);
+              } catch {}
+            }}
+          >
+            浮窗
+          </button>
           <button
             className={`test-modal-trigger${config.keyboard_input_enabled ? " kb-active" : ""}`}
             onClick={() => updateConfig("keyboard_input_enabled", !config.keyboard_input_enabled)}
