@@ -94,7 +94,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "config.hours": "小时",
     "config.minutes": "分",
     "config.seconds": "秒",
-    "config.kbOnly": "仅输出到键盘",
+    "config.kbOnly": "键盘",
     "config.tencentCredentialsLoadFailed": "凭证加载失败",
     "config.save": "保存",
     "stt.connected": "STT 已连接",

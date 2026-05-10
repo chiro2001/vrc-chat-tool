@@ -30,6 +30,7 @@ interface Props {
   showResetConfirm: boolean;
   setShowResetConfirm: (v: boolean) => void;
   resetConfig: () => void;
+  onOpenTestRecording?: () => void;
 }
 
 const TABS = [
@@ -59,6 +60,7 @@ export default function SettingsModal({
   showResetConfirm,
   setShowResetConfirm,
   resetConfig,
+  onOpenTestRecording,
 }: Props) {
   const [activeTab, setActiveTab] = useState(0);
   const [showDeleteModelsConfirm, setShowDeleteModelsConfirm] = useState(false);
@@ -426,6 +428,17 @@ export default function SettingsModal({
           }
         />
       </div>
+      {onOpenTestRecording && (
+        <div className="config-field" style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid #444" }}>
+          <button
+            className="test-modal-trigger"
+            style={{ width: "100%", padding: "0.5rem" }}
+            onClick={() => { onClose(); onOpenTestRecording(); }}
+          >
+            {t("test.title")}
+          </button>
+        </div>
+      )}
     </>
   );
 

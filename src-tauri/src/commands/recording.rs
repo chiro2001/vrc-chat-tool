@@ -109,12 +109,6 @@ pub(crate) fn start_recording_inner(
 
             let _ = app.emit_all("recording-started", "");
 
-            let kb_start = state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false);
-            if cfg.osc_enabled && !kb_start {
-                let osc_typing = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
-                let _ = osc_typing.send_typing(true);
-            }
-
             let recognizer = if cfg.asr_provider == "local" {
                 speech::recognizer::Recognizer::Local(
                     speech::local::LocalRecognizer::new(cfg.local_stt_url.clone())
@@ -259,13 +253,6 @@ pub(crate) fn start_recording_inner(
             })?;
 
             let _ = capture_thread.join();
-
-            let kb_end = state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false);
-            if osc_enabled && !kb_end {
-                let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
-                let _ = osc.send_typing(false);
-                let _ = osc.clear_chatbox();
-            }
 
             Ok(recognized_text)
         })();
