@@ -375,19 +375,6 @@ export default function SettingsModal({
           </select>
         </div>
       )}
-
-      {/* Keyboard input */}
-      <h3>{t("config.keyboardInput")}</h3>
-      <div className="config-field">
-        <label>
-          <input
-            type="checkbox"
-            checked={config.keyboard_input_enabled ?? false}
-            onChange={(e) => updateConfig("keyboard_input_enabled", e.target.checked)}
-          />
-          {t("config.keyboardInputEnable")}
-        </label>
-      </div>
     </>
   );
 
