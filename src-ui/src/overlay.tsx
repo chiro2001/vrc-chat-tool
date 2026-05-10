@@ -3,7 +3,7 @@
 /// Uses JS mousedown/move/up for window dragging (Tauri v1 data-tauri-drag-region not reliable).
 import { useState, useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { appWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { appWindow, LogicalPosition } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import "./overlay.css";
 
@@ -33,7 +33,8 @@ function Overlay() {
         const pos = await appWindow.outerPosition();
         winX = pos.x;
         winY = pos.y;
-      } catch {}
+        console.log("drag start:", winX, winY);
+      } catch(e) { console.error("outerPosition failed:", e); }
     };
 
     const onMouseMove = async (e: MouseEvent) => {
@@ -41,8 +42,8 @@ function Overlay() {
       const dx = e.screenX - startX;
       const dy = e.screenY - startY;
       try {
-        await appWindow.setPosition(new PhysicalPosition(winX + dx, winY + dy));
-      } catch {}
+        await appWindow.setPosition(new LogicalPosition(winX + dx, winY + dy));
+      } catch(e) { console.error("setPosition failed:", e); }
     };
 
     const onMouseUp = () => { dragging = false; };
