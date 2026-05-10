@@ -83,6 +83,13 @@ fn main() {
                         log::info("main", "Starting VR controller listener");
                         vrc_chat_tool::vr::start_controller_listener(app_handle.clone());
                     }
+
+                    // Hide overlay if disabled in config
+                    if !c.floating_window_enabled {
+                        if let Some(overlay) = app_handle.get_window("overlay") {
+                            let _ = overlay.hide();
+                        }
+                    }
                 }
             }
 

@@ -41,7 +41,6 @@ function App() {
 
   // Log panel state
   const [showLogs, setShowLogs] = useState(false);
-  const [overlayVisible, setOverlayVisible] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<string>("all");
 
@@ -488,15 +487,13 @@ function App() {
             </div>
           )}
           <button
-            className={`test-modal-trigger${overlayVisible ? " kb-active" : ""}`}
-            onClick={async () => {
-              try {
-                const visible = await invoke<boolean>("toggle_overlay_window");
-                setOverlayVisible(visible);
-              } catch {}
+            className={`test-modal-trigger${config.floating_window_enabled ? " kb-active" : ""}`}
+            onClick={() => {
+              updateConfig("floating_window_enabled", !config.floating_window_enabled);
+              invoke("toggle_overlay_window").catch(() => {});
             }}
           >
-            浮窗
+            {t("config.overlay")}
           </button>
           <button
             className={`test-modal-trigger${config.keyboard_input_enabled ? " kb-active" : ""}`}
