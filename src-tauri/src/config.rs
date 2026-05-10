@@ -109,6 +109,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub keyboard_input_mode: String,
 
+    // ---- Floating overlay ----
+    #[serde(default)]
+    pub floating_window_enabled: bool,
+
     // ---- Hotkey ----
     pub global_hotkey_enabled: bool,
 }
@@ -141,6 +145,7 @@ impl Default for AppConfig {
 
             keyboard_input_enabled: false,
             keyboard_input_mode: "sendinput".to_string(),
+            floating_window_enabled: true,
 
             global_hotkey_enabled: true,
         }

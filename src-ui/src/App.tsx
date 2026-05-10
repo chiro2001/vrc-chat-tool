@@ -90,6 +90,7 @@ function App() {
     vad_min_utterance: 200.0,
     keyboard_input_enabled: false,
     keyboard_input_mode: "sendinput",
+    floating_window_enabled: true,
   });
 
 

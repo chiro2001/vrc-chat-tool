@@ -27,6 +27,7 @@ export interface AppConfig {
   vad_min_utterance: number;
   keyboard_input_enabled: boolean;
   keyboard_input_mode: string;
+  floating_window_enabled: boolean;
 }
 
 export interface AudioDevice {
