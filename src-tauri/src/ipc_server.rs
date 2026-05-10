@@ -2,18 +2,18 @@
 //! Runs in the main Tauri process, accepting a single client connection.
 //! Messages are newline-delimited JSON sent at ~30 Hz when recording.
 
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use serde::Serialize;
 
 use crate::log;
 
 static IPC_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Shared state that the recording pipeline updates.
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct OverlayMessage {
     pub status: String,
     pub text: String,
@@ -41,15 +41,15 @@ pub fn start_overlay_ipc() {
     thread::spawn(move || {
         log::info("ipc", "Starting overlay IPC server");
 
-        use winapi::um::namedpipeapi::{CreateNamedPipeA, ConnectNamedPipe};
-        use winapi::um::winbase::{PIPE_TYPE_MESSAGE, PIPE_READMODE_MESSAGE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES};
+        use winapi::um::winbase::{CreateNamedPipeA, PIPE_TYPE_MESSAGE, PIPE_READMODE_MESSAGE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES};
+        use winapi::um::namedpipeapi::ConnectNamedPipe;
         use winapi::um::fileapi::WriteFile;
+        use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
         use winapi::ctypes::c_void;
         use std::ffi::CString;
 
         let pipe_name = CString::new("\\\\.\\pipe\\vrc-chat-hud").unwrap();
 
-        // Accept clients in a loop (reconnect after disconnection)
         loop {
             if !IPC_RUNNING.load(Ordering::Relaxed) {
                 break;
@@ -63,12 +63,12 @@ pub fn start_overlay_ipc() {
                     PIPE_UNLIMITED_INSTANCES,
                     4096,
                     4096,
-                    0,           // default timeout
+                    0,
                     std::ptr::null_mut(),
                 )
             };
 
-            if handle == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+            if handle == INVALID_HANDLE_VALUE {
                 log::error("ipc", "Failed to create named pipe");
                 break;
             }
@@ -78,16 +78,15 @@ pub fn start_overlay_ipc() {
 
             if connected == 0 {
                 let err = unsafe { winapi::um::errhandlingapi::GetLastError() };
-                if err != 535 { // ERROR_PIPE_CONNECTED
+                if err != 535 {
                     log::error("ipc", &format!("ConnectNamedPipe failed: {}", err));
-                    unsafe { winapi::um::handleapi::CloseHandle(handle) };
+                    unsafe { CloseHandle(handle) };
                     continue;
                 }
             }
 
             log::info("ipc", "VR HUD client connected");
 
-            // Send messages at ~30 Hz
             let interval = Duration::from_millis(33);
             loop {
                 if !IPC_RUNNING.load(Ordering::Relaxed) {
@@ -111,7 +110,6 @@ pub fn start_overlay_ipc() {
                 };
 
                 if ok == 0 {
-                    // Client disconnected
                     log::info("ipc", "VR HUD client disconnected");
                     break;
                 }
@@ -119,7 +117,7 @@ pub fn start_overlay_ipc() {
                 thread::sleep(interval);
             }
 
-            unsafe { winapi::um::handleapi::CloseHandle(handle) };
+            unsafe { CloseHandle(handle) };
         }
     });
 }
