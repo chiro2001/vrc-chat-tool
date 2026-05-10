@@ -22,28 +22,24 @@ function Overlay() {
     let dragging = false;
     let startX = 0;
     let startY = 0;
-    let winX = 0;
-    let winY = 0;
 
-    const onMouseDown = async (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent) => {
       dragging = true;
       startX = e.screenX;
       startY = e.screenY;
-      try {
-        const pos = await appWindow.outerPosition();
-        winX = pos.x;
-        winY = pos.y;
-        console.log("drag start:", winX, winY);
-      } catch(e) { console.error("outerPosition failed:", e); }
     };
 
     const onMouseMove = async (e: MouseEvent) => {
       if (!dragging) return;
-      const dx = e.screenX - startX;
-      const dy = e.screenY - startY;
+      const dx = Math.round(e.screenX - startX);
+      const dy = Math.round(e.screenY - startY);
+      if (dx === 0 && dy === 0) return;
+      startX = e.screenX;
+      startY = e.screenY;
       try {
-        await appWindow.setPosition(new LogicalPosition(winX + dx, winY + dy));
-      } catch(e) { console.error("setPosition failed:", e); }
+        const pos = await appWindow.outerPosition();
+        await appWindow.setPosition(new LogicalPosition(pos.x + dx, pos.y + dy));
+      } catch {}
     };
 
     const onMouseUp = () => { dragging = false; };
