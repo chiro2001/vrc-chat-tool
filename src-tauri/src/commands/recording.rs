@@ -54,6 +54,15 @@ pub(crate) fn start_recording_inner(
         thread::spawn(move || {
         let is_tencent = cfg.asr_provider == "tencent";
         log::info("recorder", "Recording started");
+        let model_name_str = model_name.to_string();
+        // Update overlay IPC status
+        *vrc_chat_tool::ipc_server::OVERLAY_MSG.lock().unwrap() = vrc_chat_tool::ipc_server::OverlayMessage {
+            status: "recording".into(),
+            text: String::new(),
+            sentence: String::new(),
+            volume: 0.0,
+            model: model_name_str.clone(),
+        };
 
         // Read stt config for detailed model info
         let stt_cfg = stt_server::Config::from_file(&cfg.stt_config_path).ok();
@@ -147,6 +156,11 @@ pub(crate) fn start_recording_inner(
                         let volume = ((rms / 32768.0).min(1.0)) as f32;
                         let _ = app_for_volume.emit_all("volume-update", volume);
 
+                        // Update overlay IPC volume
+                        if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
+                            msg.volume = volume;
+                        }
+
                         // Track VAD-based speech duration for Tencent billing
                         if is_tencent {
                             let energy = rms / 32767.0;
@@ -195,6 +209,10 @@ pub(crate) fn start_recording_inner(
                     stop_signal_for_asr,
                     move |partial_text: &str| {
                         let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
+                        if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
+                            msg.status = "recognizing".into();
+                            msg.text = partial_text.to_string();
+                        }
                         if let Some(ref osc) = osc_for_partial {
                             let _ = osc.send_partial(partial_text);
                         }
@@ -207,6 +225,9 @@ pub(crate) fn start_recording_inner(
                         let clean_text = osc::sender::OscSender::strip_trailing_punctuation(sentence_text);
                         if clean_text.is_empty() { return; }
                         let _ = app_sentence.emit_all("recording-sentence", clean_text.clone());
+                        if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
+                            msg.sentence = clean_text.clone();
+                        }
                         if let Some(ref osc) = osc_s {
                             let _ = osc.send_chatbox(&clean_text);
                         }
@@ -266,6 +287,12 @@ pub(crate) fn start_recording_inner(
             Ok(text) => {
                 log::info("asr", &format!("Recognition result: {}", text));
                 let _ = app.emit_all("recording-complete", text);
+                // Reset overlay IPC to idle
+                if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
+                    msg.status = "idle".into();
+                    msg.text.clear();
+                    msg.volume = 0.0;
+                }
             }
             Err(e) => {
                 let msg = format!("{}", e);

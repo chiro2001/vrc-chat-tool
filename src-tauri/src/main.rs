@@ -88,6 +88,9 @@ fn main() {
 
             let app_handle = app.handle();
             log::info("main", "Starting trigger polling thread (200ms)");
+            // Start overlay IPC server (for vrc-chat-hud.exe companion)
+            vrc_chat_tool::ipc_server::start_overlay_ipc();
+
             thread::spawn(move || {
                 let mut last_stt_status = String::new();
                 loop {

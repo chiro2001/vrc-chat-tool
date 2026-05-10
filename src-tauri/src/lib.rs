@@ -9,3 +9,4 @@ pub mod log;
 pub mod state;
 pub mod input;
 pub mod vr;
+pub mod ipc_server;

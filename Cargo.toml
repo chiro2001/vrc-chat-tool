@@ -2,6 +2,7 @@
 members = [
     "src-tauri",
     "crates/stt-server",
+    "crates/vr-hud",
     "stt-gui",
 ]
 resolver = "2"
