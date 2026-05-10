@@ -54,15 +54,6 @@ pub(crate) fn start_recording_inner(
         thread::spawn(move || {
         let is_tencent = cfg.asr_provider == "tencent";
         log::info("recorder", "Recording started");
-        let model_name_str = model_name.to_string();
-        // Update overlay IPC status
-        *vrc_chat_tool::ipc_server::OVERLAY_MSG.lock().unwrap() = vrc_chat_tool::ipc_server::OverlayMessage {
-            status: "recording".into(),
-            text: String::new(),
-            sentence: String::new(),
-            volume: 0.0,
-            model: model_name_str.clone(),
-        };
 
         // Read stt config for detailed model info
         let stt_cfg = stt_server::Config::from_file(&cfg.stt_config_path).ok();
@@ -72,6 +63,15 @@ pub(crate) fn start_recording_inner(
             "Config: provider={} backend={} streaming={} model={} sample_rate=16000",
             cfg.asr_provider, cfg.asr_backend, streaming, model_name
         ));
+
+        // Update overlay IPC status
+        *vrc_chat_tool::ipc_server::OVERLAY_MSG.lock().unwrap() = vrc_chat_tool::ipc_server::OverlayMessage {
+            status: "recording".into(),
+            text: String::new(),
+            sentence: String::new(),
+            volume: 0.0,
+            model: model_name.to_string(),
+        };
 
         // VAD-based usage tracking for Tencent
         let base_seconds = if is_tencent {
