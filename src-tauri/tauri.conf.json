@@ -38,6 +38,7 @@
     },
     "windows": [
       {
+        "label": "main",
         "fullscreen": false,
         "resizable": true,
         "title": "VRC Voice OSC",
@@ -53,8 +54,9 @@
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
+        "focus": false,
         "width": 420,
-        "height": 160,
+        "height": 120,
         "resizable": false,
         "url": "overlay.html"
       }

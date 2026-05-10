@@ -32,22 +32,31 @@ function Overlay() {
       if (!d.dragging || !d.queried) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        d.winX += e.movementX;
-        d.winY += e.movementY;
+        const dpr = window.devicePixelRatio || 1;
+        d.winX += Math.round(e.movementX * dpr);
+        d.winY += Math.round(e.movementY * dpr);
         appWindow.setPosition(new PhysicalPosition(d.winX, d.winY)).catch(() => {});
       });
     };
     const onMouseUp = () => {
       dragPos.current.dragging = false;
-      dragPos.current.queried = false; // re-query on next drag
+      dragPos.current.queried = false;
+    };
+    // Double-click = focus main window
+    const onDblClick = () => {
+      import("@tauri-apps/api/window").then(({ WebviewWindow }) => {
+        WebviewWindow.getByLabel("main")?.setFocus();
+      });
     };
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("dblclick", onDblClick);
     return () => {
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("dblclick", onDblClick);
     };
   }, []);
 

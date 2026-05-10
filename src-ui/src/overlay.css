@@ -11,21 +11,18 @@ html {
 }
 
 body {
-  height: 100%;
-  width: 100%;
   background: transparent;
   font-family: "Segoe UI", system-ui, sans-serif;
-  overflow: hidden;
   user-select: none;
+  margin: 0;
 }
 
 #overlay-root {
-  height: 100%;
-  width: 100%;
+  min-height: 100vh;
 }
 
 .overlay-container {
-  height: 100%;
+  min-height: 100vh;
   padding: 0.6rem 1rem;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.65);
@@ -35,7 +32,6 @@ body {
   flex-direction: column;
   gap: 0.35rem;
   cursor: move;
-  -webkit-app-region: drag;
 }
 
 .overlay-idle {
