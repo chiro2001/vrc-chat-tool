@@ -91,6 +91,7 @@ function App() {
     keyboard_input_enabled: false,
     keyboard_input_mode: "sendinput",
     floating_window_enabled: true,
+    vr_controller_enabled: false,
   });
 
 

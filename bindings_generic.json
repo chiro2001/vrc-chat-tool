@@ -1,0 +1,20 @@
+{
+  "action_manifest_version": 0,
+  "bindings": {
+    "/actions/main": {
+      "sources": [
+        {
+          "inputs": {
+            "double": {
+              "output": "/actions/main/in/ToggleRecording"
+            }
+          },
+          "mode": "button",
+          "path": "/user/hand/left/input/trigger"
+        }
+      ]
+    }
+  },
+  "controller_type": "generic",
+  "description": "Default bindings — double-click left trigger to toggle recording"
+}

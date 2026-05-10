@@ -1,0 +1,36 @@
+{
+  "default_bindings": [
+    {
+      "controller_type": "knuckles",
+      "binding_url": "bindings_knuckles.json"
+    },
+    {
+      "controller_type": "oculus_touch",
+      "binding_url": "bindings_oculus.json"
+    },
+    {
+      "controller_type": "holographic_controller",
+      "binding_url": "bindings_generic.json"
+    }
+  ],
+  "actions": [
+    {
+      "name": "/actions/main/in/ToggleRecording",
+      "requirement": "optional",
+      "type": "boolean"
+    }
+  ],
+  "action_sets": [
+    {
+      "name": "/actions/main",
+      "usage": "single"
+    }
+  ],
+  "localization": [
+    {
+      "language_tag": "en_us",
+      "/actions/main": "VRC Chat Tool",
+      "/actions/main/in/ToggleRecording": "Toggle Recording"
+    }
+  ]
+}

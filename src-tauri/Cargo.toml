@@ -30,6 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
 winapi = { version = "0.3", features = ["winuser", "libloaderapi", "minwindef"] }
 stt-server = { path = "../crates/stt-server" }
+openvr = "0.9.0"
 
 [[bin]]
 name = "test_e2e"

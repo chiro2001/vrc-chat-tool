@@ -78,6 +78,11 @@ fn main() {
                     } else {
                         log::info("main", "Global hotkey disabled in config");
                     }
+
+                    if c.vr_controller_enabled {
+                        log::info("main", "Starting VR controller listener");
+                        vrc_chat_tool::vr::start_controller_listener(app_handle.clone());
+                    }
                 }
             }
 

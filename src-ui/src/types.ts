@@ -28,6 +28,7 @@ export interface AppConfig {
   keyboard_input_enabled: boolean;
   keyboard_input_mode: string;
   floating_window_enabled: boolean;
+  vr_controller_enabled: boolean;
 }
 
 export interface AudioDevice {
