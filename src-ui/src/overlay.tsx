@@ -1,7 +1,7 @@
-/// Overlay window — transparent always-on-top display showing real-time recognition.
-/// Two-line layout: current partial (top) + last confirmed sentence (bottom).
-import { useState, useEffect } from "react";
+﻿/// Overlay window — transparent always-on-top display showing real-time recognition.
+import { useState, useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { appWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import "./overlay.css";
 
@@ -11,68 +11,74 @@ function Overlay() {
   const [lastSentence, setLastSentence] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
   const [lastError, setLastError] = useState("");
+  const dragPos = useRef({ startX: 0, startY: 0, winX: 0, winY: 0, dragging: false, queried: false });
+
+  // --- Window dragging: query outerPosition once per drag session ---
+  useEffect(() => {
+    let frame: number;
+    const onMouseDown = async (e: MouseEvent) => {
+      const d = dragPos.current;
+      d.dragging = true;
+      d.startX = e.screenX;
+      d.startY = e.screenY;
+      if (!d.queried) {
+        try {
+          const pos = await appWindow.outerPosition();
+          d.winX = pos.x;
+          d.winY = pos.y;
+          d.queried = true;
+        } catch {}
+      }
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      const d = dragPos.current;
+      if (!d.dragging || !d.queried) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const dx = e.screenX - d.startX;
+        const dy = e.screenY - d.startY;
+        appWindow.setPosition(new PhysicalPosition(d.winX + dx, d.winY + dy)).catch(() => {});
+      });
+    };
+    const onMouseUp = () => {
+      dragPos.current.dragging = false;
+      dragPos.current.queried = false; // re-query on next drag
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
-
-    listen<string>("recording-started", () => {
-      setStatus("recording");
-      setCurrentPartial("");
-      setLastError("");
-    }).then((fn) => unlisteners.push(fn));
-
-    listen<string>("recording-partial", (event) => {
-      setStatus("recognizing");
-      setCurrentPartial(event.payload);
-    }).then((fn) => unlisteners.push(fn));
-
-    listen<string>("recording-sentence", (event) => {
-      setLastSentence(event.payload);
-      setCurrentPartial("");
-    }).then((fn) => unlisteners.push(fn));
-
-    listen<string>("recording-complete", () => {
-      setStatus("idle");
-      setCurrentPartial("");
-    }).then((fn) => unlisteners.push(fn));
-
-    listen<string>("recording-error", (event) => {
-      setStatus("error");
-      setLastError(event.payload);
-    }).then((fn) => unlisteners.push(fn));
-
-    listen<number>("volume-update", (event) => {
-      setCurrentVolume(event.payload);
-    }).then((fn) => unlisteners.push(fn));
-
-    return () => { unlisteners.forEach((fn) => fn()); };
+    listen<string>("recording-started", () => { setStatus("recording"); setCurrentPartial(""); setLastError(""); }).then(fn => unlisteners.push(fn));
+    listen<string>("recording-partial", (e) => { setStatus("recognizing"); setCurrentPartial(e.payload); }).then(fn => unlisteners.push(fn));
+    listen<string>("recording-sentence", (e) => { setLastSentence(e.payload); setCurrentPartial(""); }).then(fn => unlisteners.push(fn));
+    listen<string>("recording-complete", () => { setStatus("idle"); setCurrentPartial(""); }).then(fn => unlisteners.push(fn));
+    listen<string>("recording-error", (e) => { setStatus("error"); setLastError(e.payload); }).then(fn => unlisteners.push(fn));
+    listen<number>("volume-update", (e) => { setCurrentVolume(e.payload); }).then(fn => unlisteners.push(fn));
+    return () => { unlisteners.forEach(fn => fn()); };
   }, []);
 
-  const statusText = () => {
-    switch (status) {
-      case "recording": return "录音中...";
-      case "recognizing": return "识别中...";
-      case "error": return "错误";
-      default: return "";
-    }
-  };
+  const st = () => { switch(status) { case "recording": return "录音中..."; case "recognizing": return "识别中..."; case "error": return "错误"; default: return ""; } };
 
   return (
-    <div className="overlay-container" data-tauri-drag-region>
+    <div className="overlay-container">
       {status !== "idle" && (
         <div className={`overlay-status status-${status}`}>
           <span className="status-dot" />
-          <span>{statusText()}</span>
-          <span className="volume-bar">
-            <div className="volume-fill" style={{ width: `${(currentVolume * 100).toFixed(0)}%` }} />
-          </span>
+          <span>{st()}</span>
+          <span className="volume-bar"><div className="volume-fill" style={{ width: `${(currentVolume*100).toFixed(0)}%` }} /></span>
         </div>
       )}
-
       <div className={`overlay-partial${currentPartial ? " visible" : ""}`}>
         {currentPartial || (status === "idle" && !lastSentence ? "就绪 — 等待语音输入" : "")}
       </div>
-
       {lastSentence && <div className="overlay-sentence">{lastSentence}</div>}
       {lastError && <div className="overlay-error">{lastError}</div>}
     </div>
