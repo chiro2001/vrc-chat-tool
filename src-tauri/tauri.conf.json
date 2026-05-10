@@ -16,7 +16,20 @@
       "http": { "all": true, "scope": ["http://**", "https://**"] },
       "fs": { "readFile": true, "writeFile": true, "scope": ["$APPDATA/**", "$RESOURCE/**"] },
       "protocol": { "asset": true, "assetScope": ["**"] },
-      "clipboard": { "all": true }
+      "clipboard": { "all": true },
+      "window": {
+        "all": false,
+        "setPosition": true,
+        "setSize": true,
+        "close": true,
+        "show": true,
+        "hide": true,
+        "center": true,
+        "maximize": false,
+        "minimize": false,
+        "unmaximize": false,
+        "unminimize": false
+      }
     },
     "bundle": {
       "active": true,
