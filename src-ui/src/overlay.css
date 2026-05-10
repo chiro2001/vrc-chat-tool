@@ -23,6 +23,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  cursor: grab;
 }
 
 .overlay-idle {

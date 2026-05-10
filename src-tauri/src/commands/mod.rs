@@ -4,3 +4,4 @@ pub mod debug;
 pub mod stt;
 pub mod recording;
 pub mod maintenance;
+pub mod overlay;

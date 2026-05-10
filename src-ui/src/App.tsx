@@ -41,6 +41,7 @@ function App() {
 
   // Log panel state
   const [showLogs, setShowLogs] = useState(false);
+  const [overlayVisible, setOverlayVisible] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<string>("all");
 
@@ -424,7 +425,18 @@ function App() {
       <header>
         <h1>{t("app.title")}</h1>
         <div style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center", flexShrink: 0 }}>
-          <button 
+          <button
+            className={`test-modal-trigger${overlayVisible ? " kb-active" : ""}`}
+            onClick={async () => {
+              try {
+                const visible = await invoke<boolean>("toggle_overlay_window");
+                setOverlayVisible(visible);
+              } catch {}
+            }}
+          >
+            浮窗
+          </button>
+          <button
             onClick={toggleLang}
             style={{ padding: "0.2rem 0.5rem", background: "#444", color: "#ccc", border: "1px solid #555", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem" }}
             title="Switch language / 切换语言"

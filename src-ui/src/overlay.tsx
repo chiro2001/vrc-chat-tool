@@ -1,12 +1,12 @@
 /// Overlay window — transparent always-on-top display showing real-time recognition.
-/// Listens to Tauri events from the main window and renders a compact HUD.
+/// Two-line layout: current partial (top) + last confirmed sentence (bottom).
 import { useState, useEffect } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import ReactDOM from "react-dom/client";
 import "./overlay.css";
 
 function Overlay() {
-  const [status, setStatus] = useState<string>("idle"); // idle | recording | recognizing | done | error
+  const [status, setStatus] = useState<string>("idle");
   const [currentPartial, setCurrentPartial] = useState("");
   const [lastSentence, setLastSentence] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
@@ -18,7 +18,6 @@ function Overlay() {
     listen<string>("recording-started", () => {
       setStatus("recording");
       setCurrentPartial("");
-      setLastSentence("");
       setLastError("");
     }).then((fn) => unlisteners.push(fn));
 
@@ -53,43 +52,38 @@ function Overlay() {
 
   const statusText = () => {
     switch (status) {
-      case "recording":
-        return "录音中...";
-      case "recognizing":
-        return "识别中...";
-      case "error":
-        return "错误";
-      default:
-        return "";
+      case "recording": return "录音中...";
+      case "recognizing": return "识别中...";
+      case "error": return "错误";
+      default: return "";
     }
   };
 
-  if (status === "idle") {
-    return (
-      <div className="overlay-container">
-        <div className="overlay-idle">就绪 — 等待语音输入</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="overlay-container">
-      <div className={`overlay-status status-${status}`}>
-        <span className="status-dot" />
-        <span>{statusText()}</span>
-        <span className="volume-bar">
-          <div
-            className="volume-fill"
-            style={{ width: `${(currentVolume * 100).toFixed(0)}%` }}
-          />
-        </span>
-      </div>
-      {currentPartial && (
-        <div className="overlay-partial">{currentPartial}</div>
+    <div className="overlay-container" data-tauri-drag-region>
+      {status !== "idle" && (
+        <div className={`overlay-status status-${status}`}>
+          <span className="status-dot" />
+          <span>{statusText()}</span>
+          <span className="volume-bar">
+            <div
+              className="volume-fill"
+              style={{ width: `${(currentVolume * 100).toFixed(0)}%` }}
+            />
+          </span>
+        </div>
       )}
-      {lastSentence && status === "idle" && (
+
+      {/* Line 1: current partial (real-time) */}
+      <div className={`overlay-partial${currentPartial ? " visible" : ""}`}>
+        {currentPartial || (status === "idle" && !lastSentence ? "就绪 — 等待语音输入" : "")}
+      </div>
+
+      {/* Line 2: last confirmed sentence */}
+      {lastSentence && (
         <div className="overlay-sentence">{lastSentence}</div>
       )}
+
       {lastError && (
         <div className="overlay-error">{lastError}</div>
       )}

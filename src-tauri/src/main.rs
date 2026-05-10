@@ -194,7 +194,17 @@ fn main() {
             commands::maintenance::delete_downloaded_models,
             commands::maintenance::delete_all_data,
             commands::maintenance::reset_tencent_usage,
+            commands::overlay::toggle_overlay_window,
+            commands::overlay::is_overlay_visible,
         ])
+        .on_window_event(|event| {
+            // Close overlay when main window is destroyed
+            if let tauri::WindowEvent::Destroyed = event.event() {
+                if let Some(overlay) = event.window().app_handle().get_window("overlay") {
+                    let _ = overlay.close();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
