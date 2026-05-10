@@ -15,7 +15,9 @@ import type {
   ApiState,
 } from "./types";
 import TestRecordingModal from "./components/TestRecordingModal";
-import ConfigModal from "./components/ConfigModal";
+import ProviderBar from "./components/ProviderBar";
+import ProviderCard from "./components/ProviderCard";
+import SettingsModal from "./components/SettingsModal";
 import LogPanel from "./components/LogPanel";
 
 function App() {
@@ -58,7 +60,9 @@ function App() {
   // Config
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [config, setConfig] = useState<AppConfig>({
-    tencent_credentials_file: "tencent_credentials.yaml",
+    tencent_app_id: "",
+    tencent_secret_id: "",
+    tencent_secret_key: "",
     osc_host: "127.0.0.1",
     osc_port: 9000,
     osc_line_count: 2,
@@ -74,14 +78,14 @@ function App() {
     trigger_listener_enabled: false,
     trigger_stt_provider: "local",
     asr_backend: "sherpa-onnx",
+    onnx_provider: "cpu",
+    vad_enabled: false,
+    vad_sentence_silence: 1.2,
+    vad_sub_phrase_silence: 0.6,
+    vad_min_utterance: 200.0,
   });
 
-  // Credential form state
-  const [credsExist, setCredsExist] = useState(false);
-  const [credAppId, setCredAppId] = useState("");
-  const [credSecretId, setCredSecretId] = useState("");
-  const [credSecretKey, setCredSecretKey] = useState("");
-  const [credSaveMsg, setCredSaveMsg] = useState("");
+
 
   // STT model status
   const [modelStatus, setModelStatus] = useState<SttModelStatus | null>(null);
@@ -218,24 +222,6 @@ function App() {
     };
   }, []);
 
-  // Load credentials when config modal opens
-  useEffect(() => {
-    if (showConfigModal) {
-      invoke("get_tencent_credentials")
-        .then(() => {
-          setCredsExist(true);
-          setCredSaveMsg("");
-        })
-        .catch(() => {
-          setCredsExist(false);
-          setCredSaveMsg("loadError");
-        });
-      setCredAppId("");
-      setCredSecretId("");
-      setCredSecretKey("");
-    }
-  }, [showConfigModal]);
-
   // Listen for STT model download progress events
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -350,25 +336,6 @@ function App() {
     invoke("clear_recognition_history").then(() => setRecognitionHistory([])).catch(console.error);
   }, []);
 
-  // Save Tencent Cloud credentials
-  const saveCredentials = useCallback(async () => {
-    try {
-      await invoke("save_tencent_credentials", {
-        appId: credAppId,
-        secretId: credSecretId,
-        secretKey: credSecretKey,
-      });
-      setCredsExist(true);
-      setCredSaveMsg("saved");
-      setCredAppId("");
-      setCredSecretId("");
-      setCredSecretKey("");
-    } catch (e) {
-      setCredSaveMsg("error");
-      console.error("Failed to save credentials:", e);
-    }
-  }, [credAppId, credSecretId, credSecretKey]);
-
   // STT status helpers
   const getSttStatusClass = (status: string): string => {
     if (status === "disabled") return "disabled";
@@ -401,7 +368,7 @@ function App() {
     <div className="app-container">
       <header>
         <h1>{t("app.title")}</h1>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <div style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center", flexShrink: 0 }}>
           <button 
             onClick={toggleLang}
             style={{ padding: "0.2rem 0.5rem", background: "#444", color: "#ccc", border: "1px solid #555", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem" }}
@@ -475,14 +442,46 @@ function App() {
 
       </section>
 
-      {/* Record Button (full width) */}
+      {/* Record Button — after fixed-size control panel, before expandable ProviderCard */}
       <button
         className={`record-button ${isRecording ? "recording" : ""}`}
         onClick={toggleRecording}
-        style={{ width: "100%", marginTop: "0.5rem" }}
+        style={{ width: "100%" }}
       >
         {isRecording ? t("control.stop") : t("control.startRecording")}
       </button>
+
+      {/* Provider Selection Bar */}
+      <section className="provider-section">
+        <ProviderBar
+          config={config}
+          updateConfig={updateConfig}
+          disabled={isRecording}
+        />
+      </section>
+
+      {/* Provider Status Card (when not recording) */}
+      {!isRecording && (
+        <section className="provider-card-section">
+          <ProviderCard
+            config={config}
+            updateConfig={updateConfig}
+            modelStatus={modelStatus}
+            availableModels={availableModels}
+            currentModelName={currentModelName}
+            onOpenSettings={() => setShowConfigModal(true)}
+            triggerStatus={sttStatus}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+            downloadError={downloadError}
+            setCurrentModelName={setCurrentModelName}
+            setModelStatus={setModelStatus}
+            setDownloadError={setDownloadError}
+            setIsDownloading={setIsDownloading}
+            setDownloadProgress={setDownloadProgress}
+          />
+        </section>
+      )}
 
       {/* Results Display */}
       <section className="results-panel">
@@ -551,21 +550,12 @@ function App() {
         deleteRecording={deleteRecording}
       />
 
-      {/* Config Modal */}
-      <ConfigModal
+      {/* Settings Modal */}
+      <SettingsModal
         show={showConfigModal}
         onClose={() => setShowConfigModal(false)}
         config={config}
         updateConfig={updateConfig}
-        credsExist={credsExist}
-        credAppId={credAppId}
-        credSecretId={credSecretId}
-        credSecretKey={credSecretKey}
-        credSaveMsg={credSaveMsg}
-        setCredAppId={setCredAppId}
-        setCredSecretId={setCredSecretId}
-        setCredSecretKey={setCredSecretKey}
-        saveCredentials={saveCredentials}
         modelStatus={modelStatus}
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}

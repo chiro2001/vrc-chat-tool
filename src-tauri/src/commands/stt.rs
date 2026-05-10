@@ -281,7 +281,7 @@ pub fn set_stt_model(stt_config_path: String, model_name: String) -> Result<(), 
 }
 
 #[tauri::command]
-pub fn set_stt_backend(stt_config_path: String, backend: String) -> Result<(), String> {
+pub fn set_stt_backend(stt_config_path: String, backend: String, provider: Option<String>) -> Result<(), String> {
     let content = std::fs::read_to_string(&stt_config_path)
         .map_err(|e| format!("Failed to read {}: {}", stt_config_path, e))?;
 
@@ -293,6 +293,9 @@ pub fn set_stt_backend(stt_config_path: String, backend: String) -> Result<(), S
         asr["streaming_model"] = serde_yaml::Value::String(
             if backend == "hybrid" { "zipformer-small-ctc" } else { "transducer" }.to_string()
         );
+        if let Some(ref p) = provider {
+            asr["provider"] = serde_yaml::Value::String(p.clone());
+        }
     }
 
     let new_yaml = serde_yaml::to_string(&config)

@@ -24,7 +24,7 @@ body {
 /* ---- Header ---- */
 header {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: nowrap;
   align-items: center;
   margin-bottom: 1.5rem;
 }
@@ -34,6 +34,7 @@ header h1 {
   font-weight: 600;
   color: #ffffff;
   margin: 0;
+  margin-right: auto;
 }
 
 /* ---- Status Badge ---- */
@@ -91,7 +92,7 @@ header h1 {
   border: 1px solid #444;
   border-radius: 8px;
   padding: 1.25rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -192,6 +193,7 @@ header h1 {
   color: #ffffff;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
+  margin: 0 0 0.75rem 0;
   white-space: nowrap;
   min-width: 140px;
 }
@@ -214,8 +216,8 @@ header h1 {
 
 /* ---- Results Panel ---- */
 .results-panel {
-  margin-top: 1rem;
-  margin-bottom: 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .results-panel > div {
@@ -379,7 +381,7 @@ header h1 {
   border: 1px solid #444;
   border-radius: 8px;
   padding: 1.25rem;
-  margin-top: 1rem;
+  margin-top: 0.75rem;
 }
 
 .history-panel h2 {
@@ -530,7 +532,7 @@ h2 {
 
 /* ---- Log Panel ---- */
 .log-panel-wrapper {
-  margin-top: 1rem;
+  margin-top: 0.75rem;
   border-top: 1px solid #444;
   padding-top: 0.75rem;
 }
@@ -652,13 +654,7 @@ h2 {
 .confirm-no { background: #444; color: #ccc; }
 
 /* ---- Responsive ---- */
-@media (max-width: 600px) {
-  header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.5rem;
-  }
-
+@media (max-width: 480px) {
   .control-panel {
     flex-direction: column;
   }
@@ -675,7 +671,6 @@ h2 {
   .device-selector select { width: 100%; }
   .volume-meter { width: 100%; }
   .volume-bar { width: 100%; }
-  header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
   .history-time { display: none; }
 }
 
@@ -912,4 +907,266 @@ h2 {
 .progress-text {
   font-size: 0.72rem;
   color: #90a4ae;
+}
+
+/* ============================================
+   Provider Bar (3-button switch)
+   ============================================ */
+.provider-section {
+  margin-bottom: 0.75rem;
+}
+
+.provider-bar {
+  display: flex;
+  gap: 0.5rem;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.provider-btn {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+  white-space: nowrap;
+  background: transparent;
+  color: #999;
+  border: 1px solid #555;
+}
+
+.provider-btn:hover:not(:disabled) {
+  background: #3a3a3a;
+  color: #ccc;
+  border-color: #777;
+}
+
+.provider-btn.active {
+  background: #1a5a8a;
+  color: #ffffff;
+  border-color: #2196f3;
+}
+
+.provider-btn.active:hover {
+  background: #1976d2;
+}
+
+.provider-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   Provider Card (per-provider status)
+   ============================================ */
+.provider-card-section {
+  margin: 0.75rem 0;
+}
+
+.provider-card {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+
+.provider-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.provider-card-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.provider-card-label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #b0b0b0;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.provider-card-value {
+  font-size: 0.85rem;
+  color: #ccc;
+  font-family: 'Consolas', 'Courier New', monospace;
+  word-break: break-all;
+}
+
+.provider-card-status {
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.provider-card-status.ok {
+  color: #66bb6a;
+}
+
+.provider-card-status.error {
+  color: #ef5350;
+}
+
+/* Engine display in card */
+.provider-card-engine {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: #ccc;
+  flex-wrap: wrap;
+}
+
+.engine-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+  color: #999;
+  border: 1px solid transparent;
+}
+
+.engine-option:hover {
+  background: rgba(79, 195, 247, 0.08);
+  color: #ccc;
+}
+
+.engine-option.active {
+  color: #4fc3f7;
+  border-color: rgba(79, 195, 247, 0.3);
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.engine-radio {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 2px solid #555;
+  transition: border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.engine-option.active .engine-radio {
+  border-color: #4fc3f7;
+  background: #4fc3f7;
+  box-shadow: 0 0 4px rgba(79, 195, 247, 0.5);
+}
+
+/* Engine hint text */
+.engine-hint {
+  font-size: 0.72rem;
+  color: #777;
+  line-height: 1.4;
+  margin-top: 0.1rem;
+}
+
+/* Select in card */
+.provider-card-select {
+  padding: 0.3rem 0.5rem;
+  background: #333;
+  color: #e0e0e0;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  outline: none;
+  max-width: 200px;
+}
+
+.provider-card-select:focus {
+  border-color: #2196f3;
+}
+
+/* Action row in card */
+.provider-card-action {
+  margin-top: 0.2rem;
+}
+
+.provider-card-link {
+  background: none;
+  border: none;
+  color: #4fc3f7;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.provider-card-link:hover {
+  background: rgba(79, 195, 247, 0.1);
+  text-decoration: underline;
+}
+
+/* Progress in card */
+.provider-card-progress {
+  margin-top: 0.25rem;
+}
+
+/* ============================================
+   Settings Modal Tabs
+   ============================================ */
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #444;
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  color: #999;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.settings-tab:hover {
+  color: #ccc;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-tab.active {
+  color: #4fc3f7;
+  border-bottom-color: #4fc3f7;
+}
+
+/* ============================================
+   Maintenance Tab
+   ============================================ */
+.maintenance-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.maintenance-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.maintenance-item .reset-button {
+  width: 100%;
+  max-width: 280px;
 }

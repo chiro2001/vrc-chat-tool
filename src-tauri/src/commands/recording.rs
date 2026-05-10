@@ -28,12 +28,11 @@ pub(crate) fn start_recording_inner(
     }
 
     let tencent_creds = if cfg.asr_provider == "tencent" {
-        let creds = config::TencentCredentials::load(&cfg.tencent_credentials_file);
-        if creds.app_id.is_empty() || creds.secret_id.is_empty() || creds.secret_key.is_empty() {
+        if cfg.tencent_app_id.is_empty() || cfg.tencent_secret_id.is_empty() || cfg.tencent_secret_key.is_empty() {
             state::IS_RECORDING.store(false, Ordering::SeqCst);
             return Err("Please configure Tencent Cloud credentials first".to_string());
         }
-        Some(creds)
+        Some((cfg.tencent_app_id.clone(), cfg.tencent_secret_id.clone(), cfg.tencent_secret_key.clone()))
     } else {
         None
     };
@@ -104,12 +103,12 @@ pub(crate) fn start_recording_inner(
                         )
                     }
             } else {
-                let c = tencent_creds.as_ref().unwrap();
+                let (ref app_id, ref secret_id, ref secret_key) = tencent_creds.as_ref().unwrap();
                 speech::recognizer::Recognizer::Tencent(
                     speech::streaming::StreamingRecognizer::new(
-                        c.app_id.clone(),
-                        c.secret_id.clone(),
-                        c.secret_key.clone(),
+                        app_id.clone(),
+                        secret_id.clone(),
+                        secret_key.clone(),
                     )
                 )
             };

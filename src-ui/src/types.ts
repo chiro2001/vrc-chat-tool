@@ -1,7 +1,9 @@
 // Shared type definitions
 
 export interface AppConfig {
-  tencent_credentials_file: string;
+  tencent_app_id: string;
+  tencent_secret_id: string;
+  tencent_secret_key: string;
   osc_host: string;
   osc_port: number;
   osc_line_count: number;
@@ -17,6 +19,11 @@ export interface AppConfig {
   trigger_listener_enabled: boolean;
   trigger_stt_provider: string;
   asr_backend: string;
+  onnx_provider: string;
+  vad_enabled: boolean;
+  vad_sentence_silence: number;
+  vad_sub_phrase_silence: number;
+  vad_min_utterance: number;
 }
 
 export interface AudioDevice {
@@ -61,6 +68,7 @@ export interface AvailableModel {
   name: string;
   display_name: string;
   size_bytes: number;
+  backend: string;
   files: {
     encoder: string;
     decoder: string;

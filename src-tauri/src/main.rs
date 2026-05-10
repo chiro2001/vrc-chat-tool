@@ -164,8 +164,6 @@ fn main() {
             commands::config::get_config,
             commands::config::save_config,
             commands::config::reset_config,
-            commands::config::get_tencent_credentials,
-            commands::config::save_tencent_credentials,
             commands::recording::list_audio_devices,
             commands::recording::start_recording,
             commands::recording::stop_recording,
@@ -184,6 +182,9 @@ fn main() {
             commands::stt::get_available_models,
             commands::stt::set_stt_model,
             commands::stt::set_stt_backend,
+            commands::maintenance::get_models_disk_usage,
+            commands::maintenance::delete_downloaded_models,
+            commands::maintenance::delete_all_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

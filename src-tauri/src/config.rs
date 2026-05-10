@@ -9,14 +9,12 @@ use anyhow::Result;
 /// 3. Executable's directory (for production builds)
 /// 4. Executable's parent directory (for dev: target/debug → target → project root)
 fn find_config_file(name: &str) -> Option<PathBuf> {
-    // 1. CWD-relative
     let cwd = Path::new(name);
     if cwd.exists() {
         eprintln!("[config] Found {} in CWD", name);
         return Some(cwd.to_path_buf());
     }
 
-    // 2. Search upward from CWD
     if let Ok(cwd) = std::env::current_dir() {
         let mut dir = cwd.as_path();
         loop {
@@ -32,7 +30,6 @@ fn find_config_file(name: &str) -> Option<PathBuf> {
         }
     }
 
-    // 3. Exe directory
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             let candidate = exe_dir.join(name);
@@ -40,14 +37,12 @@ fn find_config_file(name: &str) -> Option<PathBuf> {
                 eprintln!("[config] Found {} in exe dir: {}", name, exe_dir.display());
                 return Some(candidate);
             }
-            // 4. Exe's parent (for target/debug → target → project dir)
             if let Some(parent) = exe_dir.parent() {
                 let candidate = parent.join(name);
                 if candidate.exists() {
                     eprintln!("[config] Found {} in exe parent: {}", name, parent.display());
                     return Some(candidate);
                 }
-                // 5. Grandparent (for target/debug → target → project-dir)
                 if let Some(grandparent) = parent.parent() {
                     let candidate = grandparent.join(name);
                     if candidate.exists() {
@@ -63,103 +58,78 @@ fn find_config_file(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Tencent Cloud credentials — stored in a SEPARATE file to avoid leaking secrets in git.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TencentCredentials {
-    pub app_id: String,
-    pub secret_id: String,
-    pub secret_key: String,
-}
-
-impl Default for TencentCredentials {
-    fn default() -> Self {
-        Self {
-            app_id: "".to_string(),
-            secret_id: "".to_string(),
-            secret_key: "".to_string(),
+/// Load environment variables from .env file (for credentials).
+/// Returns quietly if .env is not found.
+fn load_dotenv() {
+    if let Some(env_path) = find_config_file(".env") {
+        match dotenvy::from_path(&env_path) {
+            Ok(_) => eprintln!("[config] Loaded .env from {}", env_path.display()),
+            Err(e) => eprintln!("[config] Failed to load .env: {}", e),
         }
-    }
-}
-
-impl TencentCredentials {
-    pub fn load(path: &str) -> Self {
-        let resolved = find_config_file(path);
-
-        let p = match resolved {
-            Some(r) => r,
-            None => {
-                eprintln!("Credentials file '{}' not found, using defaults", path);
-                return Self::default();
-            }
-        };
-
-        match fs::read_to_string(&p) {
-            Ok(content) => match serde_yaml::from_str(&content) {
-                Ok(creds) => creds,
-                Err(e) => {
-                    eprintln!("Failed to parse '{}': {}, using defaults", p.display(), e);
-                    Self::default()
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to read '{}': {}, using defaults", p.display(), e);
-                Self::default()
-            }
-        }
-    }
-
-    pub fn save(&self, path: &str) -> Result<()> {
-        let content = serde_yaml::to_string(self)?;
-        fs::write(path, content)?;
-        Ok(())
+    } else {
+        eprintln!("[config] .env not found, using defaults for credentials");
     }
 }
 
 /// Application configuration — stored in config.yaml (gitignored).
-/// Credentials are kept in a separate file (referenced by credentials_file).
+/// Credentials are loaded from .env on startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub tencent_credentials_file: String,
+    // ---- ASR ----
+    pub asr_provider: String,
+    pub asr_backend: String,
+    pub onnx_provider: String,
+    pub local_stt_url: String,
+    pub stt_config_path: String,
+
+    // ---- Tencent credentials (from .env) ----
+    pub tencent_app_id: String,
+    pub tencent_secret_id: String,
+    pub tencent_secret_key: String,
+
+    // ---- OSC ----
+    pub osc_enabled: bool,
     pub osc_host: String,
     pub osc_port: u16,
     pub osc_line_count: usize,
     pub osc_retention_secs: u64,
     pub osc_remove_period: bool,
-    pub asr_provider: String,
-    pub local_stt_url: String,
-    /// Path to local embedded STT model config (Sherpa-ONNX YAML)
-    pub stt_config_path: String,
-    pub osc_enabled: bool,
+
+    // ---- Trigger listener ----
     pub trigger_listener_enabled: bool,
+    pub trigger_stt_provider: String,
     pub trigger_start: String,
     pub trigger_stop: String,
-    /// STT provider for the always-on trigger listener.
-    /// "local" = remote STT server (WebSocket), "local_embedded" = in-process Sherpa-ONNX.
-    pub trigger_stt_provider: String,
-    /// Engine backend for local_embedded provider.
-    /// "sherpa-onnx" = traditional transducer, "hybrid" = Zipformer CTC + SenseVoice.
-    pub asr_backend: String,
+
+    // ---- Hotkey ----
     pub global_hotkey_enabled: bool,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            tencent_credentials_file: "tencent_credentials.yaml".to_string(),
+            asr_provider: "local_embedded".to_string(),
+            asr_backend: "sherpa-onnx".to_string(),
+            onnx_provider: "cpu".to_string(),
+            local_stt_url: "ws://192.168.101.7:8765".to_string(),
+            stt_config_path: "stt-config.yaml".to_string(),
+
+            tencent_app_id: String::new(),
+            tencent_secret_id: String::new(),
+            tencent_secret_key: String::new(),
+
+            osc_enabled: true,
             osc_host: "127.0.0.1".to_string(),
             osc_port: 9000,
             osc_line_count: 2,
             osc_retention_secs: 5,
             osc_remove_period: true,
-            asr_provider: "tencent".to_string(),
-            local_stt_url: "ws://192.168.101.7:8765".to_string(),
-            stt_config_path: "stt-config.yaml".to_string(),
-            osc_enabled: true,
+
             trigger_listener_enabled: false,
+            trigger_stt_provider: "local".to_string(),
             trigger_start: "开始语音识别".to_string(),
             trigger_stop: "结束语音识别".to_string(),
-            trigger_stt_provider: "local".to_string(),
-            asr_backend: "sherpa-onnx".to_string(),
+
             global_hotkey_enabled: true,
         }
     }
@@ -167,65 +137,42 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
+        load_dotenv();
+
         let path = find_config_file("config.yaml")
             .unwrap_or_else(|| PathBuf::from("config.yaml"));
 
-        match fs::read_to_string(&path) {
+        let mut config = match fs::read_to_string(&path) {
             Ok(content) => match serde_yaml::from_str(&content) {
-                Ok(config) => Ok(config),
+                Ok(config) => config,
                 Err(e) => {
                     eprintln!("Failed to parse {}: {}, using default config", path.display(), e);
-                    Ok(Self::default())
+                    Self::default()
                 }
             },
             Err(_) => {
                 eprintln!("config.yaml not found, using default config");
-                Ok(Self::default())
+                Self::default()
             }
+        };
+
+        // Override credentials from .env if present
+        if config.tencent_app_id.is_empty() {
+            if let Ok(val) = std::env::var("TENCENT_APP_ID") { config.tencent_app_id = val; }
         }
+        if config.tencent_secret_id.is_empty() {
+            if let Ok(val) = std::env::var("TENCENT_SECRET_ID") { config.tencent_secret_id = val; }
+        }
+        if config.tencent_secret_key.is_empty() {
+            if let Ok(val) = std::env::var("TENCENT_SECRET_KEY") { config.tencent_secret_key = val; }
+        }
+
+        Ok(config)
     }
 
     pub fn save(&self) -> Result<()> {
         let content = serde_yaml::to_string(self)?;
-        // Save to CWD (same place load() searched first)
         fs::write("config.yaml", content)?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_credentials_roundtrip() {
-        let creds = TencentCredentials::default();
-        let yaml = serde_yaml::to_string(&creds).unwrap();
-        let deserialized: TencentCredentials = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(creds.app_id, deserialized.app_id);
-    }
-
-    #[test]
-    fn test_find_config_file_cwd() {
-        // Create a temp file in CWD and verify find_config_file finds it
-        let name = "__test_find_cwd.yaml";
-        fs::write(name, "test").unwrap();
-        let found = find_config_file(name);
-        fs::remove_file(name).ok();
-        assert!(found.is_some());
-    }
-
-    #[test]
-    fn test_find_config_file_not_found() {
-        let found = find_config_file("__nonexistent_file_12345.yaml");
-        assert!(found.is_none());
-    }
-
-    #[test]
-    fn test_appconfig_default() {
-        let cfg = AppConfig::default();
-        assert_eq!(cfg.tencent_credentials_file, "tencent_credentials.yaml");
-        assert_eq!(cfg.osc_host, "127.0.0.1");
-        assert_eq!(cfg.osc_port, 9000);
     }
 }

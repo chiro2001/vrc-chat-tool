@@ -12,16 +12,6 @@ interface Props {
   onClose: () => void;
   config: AppConfig;
   updateConfig: (field: keyof AppConfig, value: string | number | boolean) => void;
-  // Tencent credentials
-  credsExist: boolean;
-  credAppId: string;
-  credSecretId: string;
-  credSecretKey: string;
-  credSaveMsg: string;
-  setCredAppId: (v: string) => void;
-  setCredSecretId: (v: string) => void;
-  setCredSecretKey: (v: string) => void;
-  saveCredentials: () => void;
   // STT model
   modelStatus: SttModelStatus | null;
   isDownloading: boolean;
@@ -46,15 +36,7 @@ export default function ConfigModal({
   onClose,
   config,
   updateConfig,
-  credsExist,
-  credAppId,
-  credSecretId,
-  credSecretKey,
-  credSaveMsg,
-  setCredAppId,
-  setCredSecretId,
-  setCredSecretKey,
-  saveCredentials,
+
   modelStatus,
   isDownloading,
   downloadProgress,
@@ -190,32 +172,21 @@ export default function ConfigModal({
               </div>
             </>
           ) : (
-            <div className="config-field">
-              <label>{t("config.credentialsFile")}</label>
-              <input type="text" value={config.tencent_credentials_file} onChange={(e) => updateConfig("tencent_credentials_file", e.target.value)} />
-            </div>
+            <>
+              <div className="config-field">
+                <label>{t("config.tencentAppId")}</label>
+                <input type="text" value={config.tencent_app_id} onChange={(e) => updateConfig("tencent_app_id", e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.tencentSecretId")}</label>
+                <input type="text" value={config.tencent_secret_id} onChange={(e) => updateConfig("tencent_secret_id", e.target.value)} />
+              </div>
+              <div className="config-field">
+                <label>{t("config.tencentSecretKey")}</label>
+                <input type="password" value={config.tencent_secret_key} onChange={(e) => updateConfig("tencent_secret_key", e.target.value)} />
+              </div>
+            </>
           )}
-
-          {/* Tencent Credentials */}
-          <h3>{t("config.tencentCredentials")}</h3>
-          {credSaveMsg === "loadError" && <p className="cred-status-msg error" style={{ margin: "0 0 0.5rem 0" }}>{t("config.tencentCredentialsLoadFailed")}</p>}
-          <div className="config-field">
-            <label>{t("config.tencentAppId")}</label>
-            <input type="password" placeholder={credsExist ? "••••••••" : t("config.placeholder.credentials")} value={credAppId} onChange={(e) => setCredAppId(e.target.value)} />
-          </div>
-          <div className="config-field">
-            <label>{t("config.tencentSecretId")}</label>
-            <input type="password" placeholder={credsExist ? "••••••••" : t("config.placeholder.credentials")} value={credSecretId} onChange={(e) => setCredSecretId(e.target.value)} />
-          </div>
-          <div className="config-field">
-            <label>{t("config.tencentSecretKey")}</label>
-            <input type="password" placeholder={credsExist ? "••••••••" : t("config.placeholder.credentials")} value={credSecretKey} onChange={(e) => setCredSecretKey(e.target.value)} />
-          </div>
-          <div className="config-field" style={{ flexDirection: "row", alignItems: "center", gap: "0.75rem" }}>
-            <button className="save-button" onClick={saveCredentials}>{t("config.save")}</button>
-            {credSaveMsg === "saved" && <span className="cred-status-msg saved">{t("config.tencentCredentialsSaved")}</span>}
-            {credSaveMsg === "error" && <span className="cred-status-msg error">{t("config.tencentCredentialsSaveFailed")}</span>}
-          </div>
 
           {/* OSC Config */}
           <h3>{t("config.osc")}</h3>

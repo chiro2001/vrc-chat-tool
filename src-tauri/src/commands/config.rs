@@ -50,22 +50,3 @@ pub fn reset_config() -> Result<config::AppConfig, String> {
     *state::CURRENT_CONFIG.lock().unwrap() = Some(default_config.clone());
     Ok(default_config)
 }
-
-#[tauri::command]
-pub fn get_tencent_credentials() -> Result<config::TencentCredentials, String> {
-    let cfg = state::CURRENT_CONFIG.lock().unwrap();
-    let credentials_file = cfg.as_ref()
-        .map(|c| c.tencent_credentials_file.clone())
-        .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
-    Ok(config::TencentCredentials::load(&credentials_file))
-}
-
-#[tauri::command]
-pub fn save_tencent_credentials(app_id: String, secret_id: String, secret_key: String) -> Result<(), String> {
-    let cfg = state::CURRENT_CONFIG.lock().unwrap();
-    let credentials_file = cfg.as_ref()
-        .map(|c| c.tencent_credentials_file.clone())
-        .unwrap_or_else(|| "tencent_credentials.yaml".to_string());
-    let creds = config::TencentCredentials { app_id, secret_id, secret_key };
-    creds.save(&credentials_file).map_err(|e| format!("Failed to save: {}", e))
-}
