@@ -512,7 +512,8 @@ function App() {
             onProviderChange={handleProviderChange}
           />
         </section>
-        {(!isRecording || config.asr_provider === "tencent") && (
+        {(!isRecording || config.asr_provider === "tencent") &&
+         !(config.asr_provider === "local_embedded" && modelStatus?.exists) && (
           <section className="provider-card-section" style={{ margin: 0, padding: '1rem 1.25rem', paddingTop: 0, borderTop: '1px solid #444' }}>
             <ProviderCard
               config={config}
