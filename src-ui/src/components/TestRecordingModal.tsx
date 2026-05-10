@@ -45,25 +45,35 @@ export default function TestRecordingModal({
           </div>
 
           {testRecordings.length > 0 && (
-            <div className="recordings-list">
-              {testRecordings.map((rec) => (
-                <div key={rec.filename} className="recording-item">
-                  <span className="rec-filename" title={rec.path}>{rec.filename}</span>
-                  <span className="rec-size">({(rec.size_bytes / 1024).toFixed(1)} KB)</span>
-                  <button
-                    className="play-button"
-                    onClick={() => playRecording(rec.path)}
-                  >
-                    {t("test.play")}
-                  </button>
-                  <button
-                    className="delete-button"
-                    onClick={() => deleteRecording(rec.filename)}
-                  >
-                    {t("test.delete")}
-                  </button>
-                </div>
-              ))}
+            <>
+              <div className="recordings-list">
+                {testRecordings.map((rec) => (
+                  <div key={rec.filename} className="recording-item">
+                    <span className="rec-filename" title={rec.path}>{rec.filename}</span>
+                    <span className="rec-size">{(rec.size_bytes / 1024).toFixed(1)} KB</span>
+                    <button
+                      className="play-button"
+                      onClick={() => playRecording(rec.path)}
+                    >
+                      {t("test.play")}
+                    </button>
+                    <button
+                      className="delete-button"
+                      onClick={() => deleteRecording(rec.filename)}
+                    >
+                      {t("test.delete")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="recordings-list-footer">
+                {t("test.count", String(testRecordings.length))}
+              </div>
+            </>
+          )}
+          {testRecordings.length === 0 && (
+            <div className="recordings-list-footer empty">
+              {t("test.noRecordings")}
             </div>
           )}
         </div>

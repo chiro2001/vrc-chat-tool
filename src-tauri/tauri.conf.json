@@ -15,6 +15,7 @@
       "path": { "all": true },
       "http": { "all": true, "scope": ["http://**", "https://**"] },
       "fs": { "readFile": true, "writeFile": true, "scope": ["$APPDATA/**", "$RESOURCE/**"] },
+      "protocol": { "asset": true, "assetScope": ["**"] },
       "clipboard": { "all": true }
     },
     "bundle": {

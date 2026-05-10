@@ -6,6 +6,15 @@ use tauri::Manager;
 use vrc_chat_tool::state;
 use vrc_chat_tool::audio;
 
+// --- VAD state for test recording ---
+struct VadState {
+    speech_buffer: Vec<u8>,
+    silence_samples: usize,
+    had_speech: bool,
+    total_speech_samples: usize,
+    total_silence_samples: usize,
+}
+
 // --- Helpers ---
 
 fn emit_log(app: &tauri::AppHandle, level: &str, module: &str, message: &str) {
@@ -113,12 +122,24 @@ pub fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) 
 
         let pcm_buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
         let pcm_buffer_clone = pcm_buffer.clone();
+        let vad_buffer = Arc::new(Mutex::new(Vec::<u8>::new()));  // post-VAD audio
+        let vad_buffer_clone = vad_buffer.clone();
         let stop_signal = Arc::new(AtomicBool::new(false));
         let stop_signal_clone = stop_signal.clone();
         let app_emit = app_clone.clone();
 
         let _ = app_clone.emit_all("recording-started", "");
-        emit_log(&app_clone, "info", "audio", "Test recording started");
+        emit_log(&app_clone, "info", "audio", "Test recording started (with VAD)");
+
+        // Energy-based VAD state
+        let vad_state = Arc::new(Mutex::new(VadState {
+            speech_buffer: Vec::new(),
+            silence_samples: 0,
+            had_speech: false,
+            total_speech_samples: 0,
+            total_silence_samples: 0,
+        }));
+        let vad_state_clone = vad_state.clone();
 
         let capture_thread = thread::spawn(move || {
             let result = capture.capture_streaming(
@@ -132,6 +153,29 @@ pub fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) 
                     let rms = (sum / (chunk.len() / 2) as f64).sqrt();
                     let volume = ((rms / 32768.0).min(1.0)) as f32;
                     let _ = app_emit.emit_all("volume-update", volume);
+                    
+                    // Energy-based VAD: RMS >= 5% = speech
+                    let energy = rms / 32767.0;
+                    let mut vs = vad_state_clone.lock().unwrap();
+                    if energy >= 0.005 {
+                        vs.speech_buffer.extend_from_slice(&chunk);
+                        vs.silence_samples = 0;
+                        vs.had_speech = true;
+                    } else {
+                        vs.silence_samples += chunk.len() / 2; // samples
+                        // Keep trailing silence up to 0.3s for natural endpoint
+                        if vs.speech_buffer.len() > 0 && vs.silence_samples < 16000 * 3 / 10 {
+                            vs.speech_buffer.extend_from_slice(&chunk);
+                        }
+                        // Flush segment when silence exceeds threshold after speech
+                        if vs.silence_samples >= 16000 * 3 / 10 && vs.had_speech && !vs.speech_buffer.is_empty() {
+                            let mut out = vad_buffer_clone.lock().unwrap();
+                            out.extend_from_slice(&vs.speech_buffer);
+                            vs.total_speech_samples += vs.speech_buffer.len() / 2;
+                            vs.speech_buffer.clear();
+                            vs.had_speech = false;
+                        }
+                    }
                 },
                 stop_signal_clone,
             );
@@ -146,20 +190,44 @@ pub fn start_test_recording(app: tauri::AppHandle, device_index: Option<usize>) 
         stop_signal.store(true, Ordering::SeqCst);
         let _ = capture_thread.join();
 
-        let pcm_data = pcm_buffer.lock().unwrap().clone();
-        if pcm_data.is_empty() {
+        // Flush remaining speech buffer
+        {
+            let mut vs = vad_state.lock().unwrap();
+            if vs.had_speech && !vs.speech_buffer.is_empty() {
+                vad_buffer.lock().unwrap().extend_from_slice(&vs.speech_buffer);
+                vs.total_speech_samples += vs.speech_buffer.len() / 2;
+            }
+        }
+
+        let vad_data = vad_buffer.lock().unwrap().clone();
+        let raw_pcm = pcm_buffer.lock().unwrap().clone();
+        let vs = vad_state.lock().unwrap();
+
+        // Use VAD-filtered audio if available, otherwise fall back to raw
+        let save_data = if vad_data.len() > 1600 { // at least 100ms
+            &vad_data
+        } else {
+            &raw_pcm
+        };
+
+        if save_data.is_empty() {
             emit_log(&app_clone, "warn", "audio", "No audio data captured in test recording");
             let _ = app_clone.emit_all("recording-error", "No audio data captured");
             return;
         }
 
+        let speech_sec = vs.total_speech_samples as f64 / 16000.0;
+        let total_sec = (raw_pcm.len() / 2) as f64 / 16000.0;
+
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH).unwrap().as_secs();
         let filename = format!("recording_{}.wav", timestamp);
 
-        match save_test_recording(pcm_data, filename.clone()) {
+        match save_test_recording(save_data.clone(), filename.clone()) {
             Ok(path) => {
-                emit_log(&app_clone, "info", "audio", &format!("Saved: {}", filename));
+                emit_log(&app_clone, "info", "audio",
+                    &format!("Saved: {} (VAD: {:.1}s speech / {:.1}s total)",
+                        filename, speech_sec, total_sec));
                 let _ = app_clone.emit_all("recording-complete", path);
             }
             Err(e) => {

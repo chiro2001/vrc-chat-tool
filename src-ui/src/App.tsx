@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke, convertFileSrc } from "@tauri-apps/api/tauri";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { t, useI18n } from "./i18n";
 import "./App.css";
@@ -27,6 +27,7 @@ function App() {
   const [lastResult, setLastResult] = useState("");
   const [currentSentence, setCurrentSentence] = useState("");
   const [currentPartial, setCurrentPartial] = useState("");
+  const [stopping, setStopping] = useState(false);
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
 
@@ -35,6 +36,7 @@ function App() {
   const [isTestRecording, setIsTestRecording] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [audioPlayer, setAudioPlayer] = useState<HTMLAudioElement | null>(null);
 
   // Log panel state
   const [showLogs, setShowLogs] = useState(false);
@@ -156,6 +158,7 @@ function App() {
       setApiState("recording");
       setCurrentPartial("");
       setCurrentSentence("");
+      setStopping(false);
       setLastResult("");
       setLastError("");
       setTriggerHeardText("");
@@ -173,10 +176,11 @@ function App() {
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-complete", (event) => {
-      setApiState("done");
       setLastResult(event.payload);
       setCurrentPartial("");
-      // Refresh recordings list when a test recording completes
+      setCurrentSentence("");
+      setStopping(false);
+      setApiState("idle");
       invoke<TestRecording[]>("list_test_recordings").then(setTestRecordings).catch(console.error);
       loadHistory();
     }).then((fn) => unlisteners.push(fn));
@@ -184,6 +188,7 @@ function App() {
     listen<string>("recording-error", (event) => {
       setApiState("error");
       setLastError(event.payload);
+      setStopping(false);
     }).then((fn) => unlisteners.push(fn));
 
     listen<number>("volume-update", (event) => {
@@ -260,10 +265,12 @@ function App() {
 
   // Toggle recording
   const toggleRecording = useCallback(() => {
+    if (stopping) return;
     if (apiState === "recording" || apiState === "recognizing") {
+      setStopping(true);
       invoke("stop_recording").catch(console.error);
-      setApiState("idle");
-    } else {
+      // recording-complete or recording-error will update apiState
+    } else if (apiState === "idle") {
       invoke("start_recording", { deviceIndex: selectedDeviceIndex }).catch(
         (e) => {
           setApiState("error");
@@ -271,7 +278,7 @@ function App() {
         }
       );
     }
-  }, [apiState, selectedDeviceIndex]);
+  }, [apiState, selectedDeviceIndex, stopping]);
 
   // Ref for hotkey listener to always have latest toggleRecording
   const toggleRecordingRef = useRef(toggleRecording);
@@ -309,8 +316,16 @@ function App() {
   }, [loadRecordings]);
 
   const playRecording = useCallback((filepath: string) => {
-    alert(t("test.savedAlert") + " " + filepath);
-  }, []);
+    if (audioPlayer) {
+      audioPlayer.pause();
+      audioPlayer.remove();
+    }
+    const assetUrl = convertFileSrc(filepath);
+    const audio = new Audio(assetUrl);
+    audio.volume = 0.8;
+    audio.play().catch((e) => console.error("Playback failed:", e));
+    setAudioPlayer(audio);
+  }, [audioPlayer]);
 
   const resetConfig = useCallback(async () => {
     try {
@@ -429,7 +444,7 @@ function App() {
         )}
 
         <div className="action-buttons">
-          <button className="test-modal-trigger" onClick={() => setShowTestModal(true)}>
+          <button className="test-modal-trigger" onClick={() => { loadRecordings(); setShowTestModal(true); }}>
             {t("test.title")}
           </button>
           <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
@@ -450,7 +465,9 @@ function App() {
       <button
         className={`record-button ${isRecording ? "recording" : ""}`}
         onClick={toggleRecording}
+        disabled={stopping || (apiState !== "idle" && apiState !== "recording" && apiState !== "recognizing")}
         style={{ width: "100%" }}
+
       >
         {isRecording ? t("control.stop") : t("control.startRecording")}
       </button>
