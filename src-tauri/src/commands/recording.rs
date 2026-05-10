@@ -50,10 +50,9 @@ pub(crate) fn start_recording_inner(
     let cfg = cfg.clone();
     let trigger_stop_partial = cfg.trigger_stop.clone();
     let trigger_stop_sentence = cfg.trigger_stop.clone();
-    let keyboard_input_enabled = cfg.keyboard_input_enabled;
         thread::spawn(move || {
         let is_tencent = cfg.asr_provider == "tencent";
-        log::info("recorder", "Recording started");
+        log::info("recorder", &format!("Recording started (kb={})", state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false)));
 
         // Read stt config for detailed model info
         let stt_cfg = stt_server::Config::from_file(&cfg.stt_config_path).ok();
@@ -110,7 +109,8 @@ pub(crate) fn start_recording_inner(
 
             let _ = app.emit_all("recording-started", "");
 
-            if cfg.osc_enabled {
+            let kb_start = state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false);
+            if cfg.osc_enabled && !kb_start {
                 let osc_typing = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
                 let _ = osc_typing.send_typing(true);
             }
@@ -208,13 +208,16 @@ pub(crate) fn start_recording_inner(
                     pcm_rx,
                     stop_signal_for_asr,
                     move |partial_text: &str| {
-                        let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
-                        if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                            msg.status = "recognizing".into();
-                            msg.text = partial_text.to_string();
-                        }
-                        if let Some(ref osc) = osc_for_partial {
-                            let _ = osc.send_partial(partial_text);
+                        let kb = state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false);
+                        if !kb {
+                            let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
+                            if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
+                                msg.status = "recognizing".into();
+                                msg.text = partial_text.to_string();
+                            }
+                            if let Some(ref osc) = osc_for_partial {
+                                let _ = osc.send_partial(partial_text);
+                            }
                         }
                         if trigger::matches_trigger(partial_text, &trigger_stop_partial) {
                             log::info("recorder", &format!("STOP detected in partial: '{}'", partial_text));
@@ -222,6 +225,19 @@ pub(crate) fn start_recording_inner(
                         }
                     },
                     move |sentence_text: &str| {
+                        // Read kb_only from CURRENT_CONFIG for real-time toggle
+                        let kb_enabled = state::CURRENT_CONFIG.lock().unwrap()
+                            .as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false);
+
+                        if kb_enabled {
+                            // Keyboard-only mode: inject raw text, skip OSC/history/events
+                            log::info("input", &format!("KB-only injecting: {}", sentence_text));
+                            if let Err(e) = vrc_chat_tool::input::inject_text(sentence_text) {
+                                log::error("input", &format!("Keyboard injection failed: {}", e));
+                            }
+                            return;
+                        }
+
                         let clean_text = osc::sender::OscSender::strip_trailing_punctuation(sentence_text);
                         if clean_text.is_empty() { return; }
                         let _ = app_sentence.emit_all("recording-sentence", clean_text.clone());
@@ -234,14 +250,6 @@ pub(crate) fn start_recording_inner(
                         history::add_entry(&clean_text, "asr");
                         log::info("asr", &format!("Sentence: {}", clean_text));
 
-                        // Keyboard input injection
-                        if keyboard_input_enabled {
-                            log::info("input", &format!("Keyboard injecting sentence: {}", clean_text));
-                            if let Err(e) = vrc_chat_tool::input::inject_text(&clean_text) {
-                                log::error("input", &format!("Keyboard injection failed: {}", e));
-                            }
-                        }
-
                         if trigger::matches_trigger(&clean_text, &trigger_stop_sentence) {
                             log::info("recorder", &format!("STOP detected in sentence: '{}'", sentence_text));
                             state::SHOULD_STOP.store(true, Ordering::SeqCst);
@@ -252,7 +260,8 @@ pub(crate) fn start_recording_inner(
 
             let _ = capture_thread.join();
 
-            if osc_enabled {
+            let kb_end = state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false);
+            if osc_enabled && !kb_end {
                 let osc = osc::sender::OscSender::new(cfg.osc_host.clone(), cfg.osc_port);
                 let _ = osc.send_typing(false);
                 let _ = osc.clear_chatbox();

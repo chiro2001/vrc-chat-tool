@@ -489,6 +489,12 @@ function App() {
           <button className="test-modal-trigger" onClick={() => { loadRecordings(); setShowTestModal(true); }}>
             {t("test.title")}
           </button>
+          <button
+            className={`test-modal-trigger${config.keyboard_input_enabled ? " kb-active" : ""}`}
+            onClick={() => updateConfig("keyboard_input_enabled", !config.keyboard_input_enabled)}
+          >
+            {t("config.kbOnly")}
+          </button>
           <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
             {t("config.title")}
           </button>
