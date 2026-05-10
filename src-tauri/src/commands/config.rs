@@ -7,7 +7,9 @@ use vrc_chat_tool::log;
 
 #[tauri::command]
 pub fn get_config() -> Option<config::AppConfig> {
-    state::CURRENT_CONFIG.lock().unwrap().clone()
+    let mut cfg = state::CURRENT_CONFIG.lock().unwrap().clone()?;
+    cfg.keyboard_input_enabled = false; // always start with keyboard-only OFF
+    Some(cfg)
 }
 
 #[tauri::command]
