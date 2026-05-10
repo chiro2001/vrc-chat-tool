@@ -166,12 +166,14 @@ pub(crate) fn start_recording_inner(
                         }
                     },
                     move |sentence_text: &str| {
-                        let _ = app_sentence.emit_all("recording-sentence", sentence_text.to_string());
+                        let clean_text = osc::sender::OscSender::strip_trailing_punctuation(sentence_text);
+                        if clean_text.is_empty() { return; }
+                        let _ = app_sentence.emit_all("recording-sentence", clean_text.clone());
                         if let Some(ref osc) = osc_s {
-                            let _ = osc.send_chatbox(sentence_text);
+                            let _ = osc.send_chatbox(&clean_text);
                         }
-                        history::add_entry(sentence_text, "asr");
-                        if trigger::matches_trigger(sentence_text, &trigger_stop_sentence) {
+                        history::add_entry(&clean_text, "asr");
+                        if trigger::matches_trigger(&clean_text, &trigger_stop_sentence) {
                             log::info("recorder", &format!("STOP detected in sentence: '{}'", sentence_text));
                             state::SHOULD_STOP.store(true, Ordering::SeqCst);
                         }

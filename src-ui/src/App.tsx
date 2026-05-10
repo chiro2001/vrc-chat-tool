@@ -25,6 +25,7 @@ function App() {
   // Recording state
   const [apiState, setApiState] = useState<ApiState>("idle");
   const [lastResult, setLastResult] = useState("");
+  const [currentSentence, setCurrentSentence] = useState("");
   const [currentPartial, setCurrentPartial] = useState("");
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
@@ -154,6 +155,7 @@ function App() {
     listen<string>("recording-started", () => {
       setApiState("recording");
       setCurrentPartial("");
+      setCurrentSentence("");
       setLastResult("");
       setLastError("");
       setTriggerHeardText("");
@@ -162,9 +164,11 @@ function App() {
     listen<string>("recording-partial", (event) => {
       setApiState("recognizing");
       setCurrentPartial(event.payload);
+      setCurrentSentence("");  // clear sentence so partial text shows
     }).then((fn) => unlisteners.push(fn));
 
-    listen<string>("recording-sentence", () => {
+    listen<string>("recording-sentence", (event) => {
+      setCurrentSentence(event.payload);
       loadHistory();
     }).then((fn) => unlisteners.push(fn));
 
@@ -485,10 +489,10 @@ function App() {
 
       {/* Results Display */}
       <section className="results-panel">
-        {currentPartial && (
+        {(currentSentence || currentPartial) && (
           <div className="partial-result">
-            <span className="label">{t("results.listening")}</span>
-            <span className="text">{currentPartial}</span>
+            <span className="label">{currentSentence ? t("results.result") : t("results.listening")}</span>
+            <span className="text">{currentSentence || currentPartial}</span>
           </div>
         )}
         {lastError && (

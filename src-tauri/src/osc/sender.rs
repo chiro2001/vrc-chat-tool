@@ -50,7 +50,8 @@ impl OscSender {
             .as_millis() as u64
     }
 
-    fn strip_trailing_punctuation(text: &str) -> String {
+    /// Strip trailing punctuation from text for clean display/OSC output.
+    pub fn strip_trailing_punctuation(text: &str) -> String {
         let punct = "。，！？；：、,.;:!?~～…—";
         text.trim_end_matches(|c: char| punct.contains(c)).to_string()
     }
