@@ -66,6 +66,7 @@ function App() {
     tencent_app_id: "",
     tencent_secret_id: "",
     tencent_secret_key: "",
+    tencent_usage_seconds: 0,
     osc_host: "127.0.0.1",
     osc_port: 9000,
     osc_line_count: 2,
@@ -189,6 +190,11 @@ function App() {
       setApiState("error");
       setLastError(event.payload);
       setStopping(false);
+    }).then((fn) => unlisteners.push(fn));
+
+    // Tencent usage update — absolute value from backend
+    listen<number>("tencent-usage-updated", (event) => {
+      setConfig((prev) => ({ ...prev, tencent_usage_seconds: event.payload }));
     }).then((fn) => unlisteners.push(fn));
 
     listen<number>("volume-update", (event) => {
@@ -472,37 +478,37 @@ function App() {
         {isRecording ? t("control.stop") : t("control.startRecording")}
       </button>
 
-      {/* Provider Selection Bar */}
-      <section className="provider-section">
-        <ProviderBar
-          config={config}
-          updateConfig={updateConfig}
-          disabled={isRecording}
-        />
-      </section>
-
-      {/* Provider Status Card (when not recording) */}
-      {!isRecording && (
-        <section className="provider-card-section">
-          <ProviderCard
+      {/* Provider Selection Bar + Card (merged) */}
+      <div className="provider-card provider-card-merged" style={{ padding: '0', overflow: 'hidden' }}>
+        <section className="provider-section" style={{ margin: 0 }}>
+          <ProviderBar
             config={config}
             updateConfig={updateConfig}
-            modelStatus={modelStatus}
-            availableModels={availableModels}
-            currentModelName={currentModelName}
-            onOpenSettings={() => setShowConfigModal(true)}
-            triggerStatus={sttStatus}
-            isDownloading={isDownloading}
-            downloadProgress={downloadProgress}
-            downloadError={downloadError}
-            setCurrentModelName={setCurrentModelName}
-            setModelStatus={setModelStatus}
-            setDownloadError={setDownloadError}
-            setIsDownloading={setIsDownloading}
-            setDownloadProgress={setDownloadProgress}
+            disabled={isRecording}
           />
         </section>
-      )}
+        {(!isRecording || config.asr_provider === "tencent") && (
+          <section className="provider-card-section" style={{ margin: 0, padding: '1rem 1.25rem', paddingTop: 0, borderTop: '1px solid #444' }}>
+            <ProviderCard
+              config={config}
+              updateConfig={updateConfig}
+              modelStatus={modelStatus}
+              availableModels={availableModels}
+              currentModelName={currentModelName}
+              onOpenSettings={() => setShowConfigModal(true)}
+              triggerStatus={sttStatus}
+              isDownloading={isDownloading}
+              downloadProgress={downloadProgress}
+              downloadError={downloadError}
+              setCurrentModelName={setCurrentModelName}
+              setModelStatus={setModelStatus}
+              setDownloadError={setDownloadError}
+              setIsDownloading={setIsDownloading}
+              setDownloadProgress={setDownloadProgress}
+            />
+          </section>
+        )}
+      </div>
 
       {/* Results Display */}
       <section className="results-panel">

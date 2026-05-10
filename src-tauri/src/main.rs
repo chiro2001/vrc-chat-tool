@@ -185,6 +185,7 @@ fn main() {
             commands::maintenance::get_models_disk_usage,
             commands::maintenance::delete_downloaded_models,
             commands::maintenance::delete_all_data,
+            commands::maintenance::reset_tencent_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

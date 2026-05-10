@@ -257,6 +257,19 @@ export default function ProviderCard({
                 : "❌ " + t("config.placeholder.credentials")}
             </span>
           </div>
+          {hasTencentCreds && (
+            <div className="provider-card-row">
+              <span className="provider-card-label">{t("config.tencentUsage")}</span>
+              <span className="provider-card-value">
+                {(() => {
+                  const s = config.tencent_usage_seconds;
+                  if (s < 60) return `${s} ${t("config.seconds")}`;
+                  if (s < 3600) return `${Math.floor(s / 60)}${t("config.minutes")}${s % 60}${t("config.seconds")}`;
+                  return `${(s / 3600).toFixed(2)} ${t("config.hours")}`;
+                })()}
+              </span>
+            </div>
+          )}
           {!hasTencentCreds && onOpenSettings && (
             <div className="provider-card-row provider-card-action">
               <button className="provider-card-link" onClick={onOpenSettings}>

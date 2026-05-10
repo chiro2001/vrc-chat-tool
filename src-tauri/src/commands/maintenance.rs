@@ -90,3 +90,14 @@ pub fn delete_all_data() -> Result<String, String> {
 
     Ok(format!("Deleted: {}", deleted.join(", ")))
 }
+
+/// Reset Tencent Cloud API usage counter to zero
+#[tauri::command]
+pub fn reset_tencent_usage() -> Result<u64, String> {
+    let mut config_guard = vrc_chat_tool::state::CURRENT_CONFIG.lock().unwrap();
+    if let Some(ref mut c) = *config_guard {
+        c.tencent_usage_seconds = 0;
+        c.save().map_err(|e| format!("{}", e))?;
+    }
+    Ok(0)
+}

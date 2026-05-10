@@ -220,6 +220,17 @@ export default function SettingsModal({
         </>
       ) : (
         <>
+          <h3 style={{ margin: "1rem 0 0.5rem", color: "#ccc" }}>{t("config.tencentCredentials")}</h3>
+          <div className="config-field" style={{ marginBottom: "0.75rem" }}>
+            <a
+              href="https://console.cloud.tencent.com/asr"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "#4fc3f7", fontSize: "0.85rem" }}
+            >
+              {t("config.tencentConsoleLink")}
+            </a>
+          </div>
           <div className="config-field">
             <label>{t("config.tencentAppId")}</label>
             <input

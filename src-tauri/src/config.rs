@@ -86,6 +86,8 @@ pub struct AppConfig {
     pub tencent_app_id: String,
     pub tencent_secret_id: String,
     pub tencent_secret_key: String,
+    /// Accumulated Tencent Cloud API usage in seconds
+    pub tencent_usage_seconds: u64,
 
     // ---- OSC ----
     pub osc_enabled: bool,
@@ -117,6 +119,7 @@ impl Default for AppConfig {
             tencent_app_id: String::new(),
             tencent_secret_id: String::new(),
             tencent_secret_key: String::new(),
+            tencent_usage_seconds: 0,
 
             osc_enabled: true,
             osc_host: "127.0.0.1".to_string(),

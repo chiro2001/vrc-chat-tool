@@ -4,6 +4,7 @@ export interface AppConfig {
   tencent_app_id: string;
   tencent_secret_id: string;
   tencent_secret_key: string;
+  tencent_usage_seconds: number;
   osc_host: string;
   osc_port: number;
   osc_line_count: number;
