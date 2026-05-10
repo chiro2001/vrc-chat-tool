@@ -1,33 +1,41 @@
-/* Overlay styles — transparent, frameless */
-html, body, #overlay-root {
-  height: 100%;
-  width: 100%;
-}
-
+/* Overlay styles — transparent, frameless, draggable via Tauri */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+html {
+  height: 100%;
+  width: 100%;
+}
+
 body {
+  height: 100%;
+  width: 100%;
   background: transparent;
   font-family: "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
   user-select: none;
 }
 
+#overlay-root {
+  height: 100%;
+  width: 100%;
+}
+
 .overlay-container {
+  height: 100%;
   padding: 0.6rem 1rem;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
   color: #e0e0e0;
-  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   cursor: move;
+  -webkit-app-region: drag;
 }
 
 .overlay-idle {
@@ -53,17 +61,9 @@ body {
   flex-shrink: 0;
 }
 
-.status-recording .status-dot {
-  background: #e74c3c;
-}
-
-.status-recognizing .status-dot {
-  background: #f39c12;
-}
-
-.status-error .status-dot {
-  background: #e74c3c;
-}
+.status-recording .status-dot { background: #e74c3c; }
+.status-recognizing .status-dot { background: #f39c12; }
+.status-error .status-dot { background: #e74c3c; }
 
 .volume-bar {
   flex: 1;
