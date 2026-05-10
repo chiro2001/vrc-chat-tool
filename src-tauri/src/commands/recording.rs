@@ -54,6 +54,15 @@ pub(crate) fn start_recording_inner(
         let is_tencent = cfg.asr_provider == "tencent";
         log::info("recorder", "Recording started");
 
+        // Read stt config for detailed model info
+        let stt_cfg = stt_server::Config::from_file(&cfg.stt_config_path).ok();
+        let model_name = stt_cfg.as_ref().map(|c| c.asr.model_name.as_str()).unwrap_or("N/A");
+        let streaming = stt_cfg.as_ref().map(|c| c.asr.streaming_model.as_str()).unwrap_or("N/A");
+        log::info("recorder", &format!(
+            "Config: provider={} backend={} streaming={} model={} sample_rate=16000",
+            cfg.asr_provider, cfg.asr_backend, streaming, model_name
+        ));
+
         // VAD-based usage tracking for Tencent
         let base_seconds = if is_tencent {
             state::CURRENT_CONFIG.lock().unwrap()
@@ -213,6 +222,7 @@ pub(crate) fn start_recording_inner(
                             let _ = osc.send_chatbox(&clean_text);
                         }
                         history::add_entry(&clean_text, "asr");
+                        log::info("asr", &format!("Sentence: {}", clean_text));
                         if trigger::matches_trigger(&clean_text, &trigger_stop_sentence) {
                             log::info("recorder", &format!("STOP detected in sentence: '{}'", sentence_text));
                             state::SHOULD_STOP.store(true, Ordering::SeqCst);

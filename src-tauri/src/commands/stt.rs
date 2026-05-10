@@ -92,9 +92,9 @@ pub const SUPPORTED_MODELS: &[AvailableModel] = &[
     },
     // ── Hybrid backend (streaming + SenseVoice refinement) ──
     AvailableModel {
-        name: "sherpa-onnx-zipformer-ctc-sensevoice-zh",
-        display_name: "混合 CTC int8 + SenseVoice (轻量) — ~176 MB",
-        size_bytes: 20_000_000 + 155_000_000,
+        name: "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01",
+        display_name: "混合 CTC int8 [推荐] — ~176 MB",
+        size_bytes: 21_000_000 + 155_000_000,
         backend: "hybrid",
         sv_model: Some(SvModelInfo {
             name: "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
@@ -277,6 +277,7 @@ pub fn set_stt_model(stt_config_path: String, model_name: String) -> Result<(), 
     std::fs::write(&stt_config_path, new_yaml)
         .map_err(|e| format!("Failed to write {}: {}", stt_config_path, e))?;
 
+    eprintln!("[set_stt_model] model={} backend={}", model.name, model.backend);
     Ok(())
 }
 

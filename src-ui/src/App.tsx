@@ -28,6 +28,7 @@ function App() {
   const [currentSentence, setCurrentSentence] = useState("");
   const [currentPartial, setCurrentPartial] = useState("");
   const [stopping, setStopping] = useState(false);
+  const pendingProviderRef = useRef<string | null>(null);
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
 
@@ -81,7 +82,7 @@ function App() {
     global_hotkey_enabled: true,
     trigger_listener_enabled: false,
     trigger_stt_provider: "local",
-    asr_backend: "sherpa-onnx",
+    asr_backend: "hybrid",
     onnx_provider: "cpu",
     vad_enabled: false,
     vad_sentence_silence: 1.2,
@@ -182,6 +183,14 @@ function App() {
       setCurrentSentence("");
       setStopping(false);
       setApiState("idle");
+      // Auto-restart if provider was switched during recording
+      const pending = pendingProviderRef.current;
+      pendingProviderRef.current = null;
+      if (pending) {
+        setTimeout(() => {
+          invoke("start_recording", { deviceIndex: selectedDeviceIndex }).catch(console.error);
+        }, 500);
+      }
       invoke<TestRecording[]>("list_test_recordings").then(setTestRecordings).catch(console.error);
       loadHistory();
     }).then((fn) => unlisteners.push(fn));
@@ -232,7 +241,13 @@ function App() {
     });
     fn.then((u) => logUnlisteners.push(u));
 
+    // Periodic log refresh (log::info doesn't emit events itself)
+    const interval = setInterval(() => {
+      invoke<LogEntry[]>("get_recent_logs").then(setLogs).catch(() => {});
+    }, 2000);
+
     return () => {
+      clearInterval(interval);
       logUnlisteners.forEach((fn) => fn());
     };
   }, []);
@@ -275,7 +290,6 @@ function App() {
     if (apiState === "recording" || apiState === "recognizing") {
       setStopping(true);
       invoke("stop_recording").catch(console.error);
-      // recording-complete or recording-error will update apiState
     } else if (apiState === "idle") {
       invoke("start_recording", { deviceIndex: selectedDeviceIndex }).catch(
         (e) => {
@@ -286,7 +300,7 @@ function App() {
     }
   }, [apiState, selectedDeviceIndex, stopping]);
 
-  // Ref for hotkey listener to always have latest toggleRecording
+  // Ref for hotkey listener
   const toggleRecordingRef = useRef(toggleRecording);
   useEffect(() => {
     toggleRecordingRef.current = toggleRecording;
@@ -389,6 +403,18 @@ function App() {
 
   const isRecording = apiState === "recording" || apiState === "recognizing";
 
+  // Handle provider switch during recording: stop, switch, auto-restart
+  const handleProviderChange = useCallback((value: string) => {
+    if (isRecording) {
+      setStopping(true);
+      updateConfig("asr_provider", value);
+      pendingProviderRef.current = value;
+      invoke("stop_recording").catch(console.error);
+    } else {
+      updateConfig("asr_provider", value);
+    }
+  }, [isRecording, updateConfig]);
+
   return (
     <div className="app-container">
       <header>
@@ -483,7 +509,7 @@ function App() {
           <ProviderBar
             config={config}
             updateConfig={updateConfig}
-            disabled={isRecording}
+            onProviderChange={handleProviderChange}
           />
         </section>
         {(!isRecording || config.asr_provider === "tencent") && (

@@ -5,6 +5,7 @@ interface Props {
   config: AppConfig;
   updateConfig: (field: keyof AppConfig, value: string | number | boolean) => void;
   disabled?: boolean;
+  onProviderChange?: (value: string) => void;
 }
 
 const PROVIDERS = [
@@ -13,15 +14,20 @@ const PROVIDERS = [
   { value: "tencent", labelKey: "config.providerTencentShort" },
 ] as const;
 
-export default function ProviderBar({ config, updateConfig, disabled }: Props) {
+export default function ProviderBar({ config, updateConfig, disabled, onProviderChange }: Props) {
   return (
     <div className="provider-bar">
       {PROVIDERS.map(({ value, labelKey }) => (
         <button
           key={value}
           className={`provider-btn ${config.asr_provider === value ? "active" : ""}`}
-          disabled={disabled}
-          onClick={() => updateConfig("asr_provider", value)}
+          onClick={() => {
+            if (onProviderChange) {
+              onProviderChange(value);
+            } else {
+              updateConfig("asr_provider", value);
+            }
+          }}
         >
           {t(labelKey)}
         </button>

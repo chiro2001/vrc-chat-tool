@@ -264,13 +264,22 @@ fn extract_tar_bz2(data: &[u8], model_dir: &Path, model_name: &str) -> Result<()
         // Single directory → rename it to model_name
         let src = entries[0].path();
         if target.exists() {
-            std::fs::remove_dir_all(&target)?;
+            // Remove old target; ignore errors (files may be locked)
+            for entry in std::fs::read_dir(&target).into_iter().flatten().flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            let _ = std::fs::remove_dir(&target);
         }
-        std::fs::rename(&src, &target)?;
+        if let Err(e) = std::fs::rename(&src, &target) {
+            anyhow::bail!("Failed to move extracted model to {}: {}", target.display(), e);
+        }
     } else {
         // Multiple files → move them all into target
         if target.exists() {
-            std::fs::remove_dir_all(&target)?;
+            for entry in std::fs::read_dir(&target).into_iter().flatten().flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            let _ = std::fs::remove_dir(&target);
         }
         std::fs::create_dir_all(&target)?;
         for entry in &entries {

@@ -111,7 +111,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             asr_provider: "local_embedded".to_string(),
-            asr_backend: "sherpa-onnx".to_string(),
+            asr_backend: "hybrid".to_string(),
             onnx_provider: "cpu".to_string(),
             local_stt_url: "ws://192.168.101.7:8765".to_string(),
             stt_config_path: "stt-config.yaml".to_string(),

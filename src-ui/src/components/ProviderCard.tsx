@@ -71,11 +71,15 @@ export default function ProviderCard({
                       backend: "sherpa-onnx",
                       provider: null,
                     });
-                    await invoke("check_stt_model", {
-                      sttConfigPath: config.stt_config_path,
-                    }).then((status) => {
-                      if (setModelStatus) setModelStatus(status as SttModelStatus);
-                    });
+                    // Auto-select first compatible model
+                    const firstModel = availableModels?.find(m => m.backend === "sherpa-onnx");
+                    if (firstModel) {
+                      if (setCurrentModelName) setCurrentModelName(firstModel.name);
+                      await invoke("set_stt_model", { sttConfigPath: config.stt_config_path, modelName: firstModel.name });
+                    }
+                    const status = await invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path });
+                    if (setModelStatus) setModelStatus(status);
+                    if (setCurrentModelName && !firstModel && status) setCurrentModelName(status.model_name);
                   } catch (err) {
                     console.error("Failed to switch backend:", err);
                   }
@@ -92,11 +96,15 @@ export default function ProviderCard({
                       backend: "hybrid",
                       provider: null,
                     });
-                    await invoke("check_stt_model", {
-                      sttConfigPath: config.stt_config_path,
-                    }).then((status) => {
-                      if (setModelStatus) setModelStatus(status as SttModelStatus);
-                    });
+                    // Auto-select first compatible model
+                    const firstModel = availableModels?.find(m => m.backend === "hybrid");
+                    if (firstModel) {
+                      if (setCurrentModelName) setCurrentModelName(firstModel.name);
+                      await invoke("set_stt_model", { sttConfigPath: config.stt_config_path, modelName: firstModel.name });
+                    }
+                    const status = await invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path });
+                    if (setModelStatus) setModelStatus(status);
+                    if (setCurrentModelName && !firstModel && status) setCurrentModelName(status.model_name);
                   } catch (err) {
                     console.error("Failed to switch backend:", err);
                   }
@@ -131,6 +139,7 @@ export default function ProviderCard({
                       sttConfigPath: config.stt_config_path,
                     });
                     if (setModelStatus) setModelStatus(status);
+                    if (setCurrentModelName) setCurrentModelName(status.model_name);
                   } catch (err) {
                     console.error("Failed to switch model:", err);
                   }
@@ -146,13 +155,9 @@ export default function ProviderCard({
               </select>
               {modelStatus ? (
                 modelStatus.exists ? (
-                  <span className="model-status ok">
-                    {t("model.exists", modelStatus.model_name)}
-                  </span>
+                  <span className="model-status ok">{t("model.exists", currentModelName || modelStatus.model_name)}</span>
                 ) : (
-                  <span className="model-status error">
-                    {t("model.missing", modelStatus.missing_files.join(", "))}
-                  </span>
+                  <span className="model-status error">{t("model.missing", modelStatus.missing_files.join(", "))}</span>
                 )
               ) : (
                 <span className="model-status checking">

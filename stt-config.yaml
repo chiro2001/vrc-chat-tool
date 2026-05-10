@@ -1,47 +1,30 @@
-# STT (Speech-to-Text) local embedded model configuration
-# 本地嵌入式语音识别模型配置
-#
-# This file is needed when asr_provider = "local_embedded"
-# For hybrid mode, select "混合推理" in settings and set backend to "hybrid"
-#
-# MODEL SETUP / 模型安装:
-#   Use the Settings UI → select "本地嵌入式推理" → click "下载模型"
-#   Or manually download from: https://github.com/k2-fsa/sherpa-onnx/releases
-#
-# The model_dir path is resolved relative to this config file's location.
-# model_dir 路径相对于此配置文件所在目录解析。
-
-server:
-  host: "0.0.0.0"
-  port: 8765
-  max_connections: 1
-
 asr:
-  model_dir: "./models"              # Directory for streaming model
-  model_name: "sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23"  # Streaming model
-  encoder: "encoder-epoch-99-avg-1.onnx"
-  decoder: "decoder-epoch-99-avg-1.onnx"
-  joiner: "joiner-epoch-99-avg-1.onnx"
-  tokens: "tokens.txt"
+  backend: sherpa-onnx
+  ctc_model_dir: ./models/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01
+  decoder: decoder-epoch-99-avg-1.onnx
+  encoder: encoder-epoch-99-avg-1.onnx
+  joiner: joiner-epoch-99-avg-1.onnx
+  language: zh
+  model_dir: ./models
+  model_name: sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23
   num_threads: 6
   sample_rate: 16000
-  backend: "hybrid"                  # Backend: "sherpa-onnx" (standard) or "hybrid" (streaming + SenseVoice)
-  streaming_model: "transducer"      # "transducer" = use existing models; "zipformer-small-ctc" = CTC model
-  ctc_model_dir: "./models/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
-  sv_model_dir: "./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
-  sv_model: "model.int8.onnx"
-  sv_tokens: "tokens.txt"
-  language: "zh"
-  # provider: "cpu"                  # ONNX execution provider (cpu / cuda)
-
+  streaming_model: transducer
+  sv_model: model.int8.onnx
+  sv_model_dir: ./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17
+  sv_tokens: tokens.txt
+  tokens: tokens.txt
+punctuation:
+  enabled: false
+  model_dir: ./models
+  model_file: ''
+  model_name: ''
+server:
+  host: 0.0.0.0
+  max_connections: 1
+  port: 8765
 vad:
   enable_endpoint_detection: true
-  rule1_min_trailing_silence: 1.2    # Sentence boundary silence (seconds)
-  rule2_min_trailing_silence: 0.6    # Sub-phrase boundary silence
-  rule3_min_utterance_length: 200.0  # Minimum utterance length
-
-punctuation:
-  enabled: false                     # Set to true and fill paths to enable punctuation restoration
-  model_dir: "./models"
-  model_name: ""
-  model_file: ""
+  rule1_min_trailing_silence: 1.2
+  rule2_min_trailing_silence: 0.6
+  rule3_min_utterance_length: 200.0

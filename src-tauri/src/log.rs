@@ -1,5 +1,6 @@
 /// Structured file logger for diagnostics.
 /// Writes to both stderr (PTY visibility) and tmp/app.log (persistent).
+/// Also pushes to the frontend LOG_BUFFER for UI display.
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
@@ -54,6 +55,19 @@ fn log_internal(level: &str, module: &str, message: &str) {
         if let Some(ref mut writer) = *guard {
             let _ = writer.file.write_all(line.as_bytes());
             let _ = writer.file.flush();
+        }
+    }
+
+    // Push to frontend log buffer for UI display
+    if let Ok(mut buf) = crate::state::LOG_BUFFER.lock() {
+        buf.push(crate::state::LogEntry {
+            timestamp: ts,
+            level: level.to_string(),
+            message: message.to_string(),
+            module: module.to_string(),
+        });
+        if buf.len() > crate::state::MAX_LOG_ENTRIES {
+            buf.remove(0);
         }
     }
 }

@@ -36,13 +36,33 @@ pub fn delete_downloaded_models() -> Result<String, String> {
     let size = dir_size(models_dir).map_err(|e| format!("{}", e))?;
     let size_mb = size as f64 / 1_048_576.0;
 
-    fs::remove_dir_all(models_dir)
-        .map_err(|e| format!("Failed to delete models: {}", e))?;
-
-    fs::create_dir_all(models_dir)
-        .map_err(|e| format!("Failed to recreate models dir: {}", e))?;
+    // Remove individual subdirectories to handle locked files better
+    for entry in fs::read_dir(models_dir).map_err(|e| format!("{}", e))? {
+        let entry = entry.map_err(|e| format!("{}", e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = remove_dir_contents(&path);
+            fs::remove_dir(&path).ok();
+        } else {
+            fs::remove_file(&path).ok();
+        }
+    }
 
     Ok(format!("Deleted {:.1} MB of model files", size_mb))
+}
+
+fn remove_dir_contents(path: &Path) -> Result<(), std::io::Error> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            remove_dir_contents(&entry_path)?;
+            fs::remove_dir(&entry_path)?;
+        } else {
+            let _ = fs::remove_file(&entry_path);
+        }
+    }
+    Ok(())
 }
 
 /// Delete all data: config, models, database, logs. Does NOT delete .env.
