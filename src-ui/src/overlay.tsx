@@ -11,16 +11,13 @@ function Overlay() {
   const [lastSentence, setLastSentence] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
   const [lastError, setLastError] = useState("");
-  const dragPos = useRef({ startX: 0, startY: 0, winX: 0, winY: 0, dragging: false, queried: false });
+  const dragPos = useRef({ winX: 0, winY: 0, dragging: false, queried: false });
 
-  // --- Window dragging: query outerPosition once per drag session ---
   useEffect(() => {
     let frame: number;
     const onMouseDown = async (e: MouseEvent) => {
       const d = dragPos.current;
       d.dragging = true;
-      d.startX = e.screenX;
-      d.startY = e.screenY;
       if (!d.queried) {
         try {
           const pos = await appWindow.outerPosition();
@@ -35,9 +32,9 @@ function Overlay() {
       if (!d.dragging || !d.queried) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const dx = e.screenX - d.startX;
-        const dy = e.screenY - d.startY;
-        appWindow.setPosition(new PhysicalPosition(d.winX + dx, d.winY + dy)).catch(() => {});
+        d.winX += e.movementX;
+        d.winY += e.movementY;
+        appWindow.setPosition(new PhysicalPosition(d.winX, d.winY)).catch(() => {});
       });
     };
     const onMouseUp = () => {
