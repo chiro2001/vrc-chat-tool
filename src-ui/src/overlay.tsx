@@ -1,7 +1,7 @@
 ﻿/// Overlay window — transparent always-on-top display showing real-time recognition.
 import { useState, useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { appWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
+import { appWindow, PhysicalPosition, PhysicalSize, WebviewWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import "./overlay.css";
 
@@ -44,9 +44,7 @@ function Overlay() {
     };
     // Double-click = focus main window
     const onDblClick = () => {
-      import("@tauri-apps/api/window").then(({ WebviewWindow }) => {
-        WebviewWindow.getByLabel("main")?.setFocus();
-      });
+      WebviewWindow.getByLabel("main")?.setFocus();
     };
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("mousemove", onMouseMove);

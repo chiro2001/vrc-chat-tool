@@ -94,6 +94,12 @@ fn main() {
             }
 
             let app_handle = app.handle();
+
+            // Ensure main window has focus (overlay with focus=false may still steal it)
+            if let Some(main) = app_handle.get_window("main") {
+                let _ = main.set_focus();
+            }
+
             log::info("main", "Starting trigger polling thread (200ms)");
 
             thread::spawn(move || {
