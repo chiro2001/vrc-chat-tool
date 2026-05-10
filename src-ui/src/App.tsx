@@ -88,6 +88,8 @@ function App() {
     vad_sentence_silence: 1.2,
     vad_sub_phrase_silence: 0.6,
     vad_min_utterance: 200.0,
+    keyboard_input_enabled: false,
+    keyboard_input_mode: "sendinput",
   });
 
 

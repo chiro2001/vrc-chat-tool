@@ -50,6 +50,7 @@ pub(crate) fn start_recording_inner(
     let cfg = cfg.clone();
     let trigger_stop_partial = cfg.trigger_stop.clone();
     let trigger_stop_sentence = cfg.trigger_stop.clone();
+    let keyboard_input_enabled = cfg.keyboard_input_enabled;
         thread::spawn(move || {
         let is_tencent = cfg.asr_provider == "tencent";
         log::info("recorder", "Recording started");
@@ -211,6 +212,15 @@ pub(crate) fn start_recording_inner(
                         }
                         history::add_entry(&clean_text, "asr");
                         log::info("asr", &format!("Sentence: {}", clean_text));
+
+                        // Keyboard input injection
+                        if keyboard_input_enabled {
+                            log::info("input", &format!("Keyboard injecting sentence: {}", clean_text));
+                            if let Err(e) = vrc_chat_tool::input::inject_text(&clean_text) {
+                                log::error("input", &format!("Keyboard injection failed: {}", e));
+                            }
+                        }
+
                         if trigger::matches_trigger(&clean_text, &trigger_stop_sentence) {
                             log::info("recorder", &format!("STOP detected in sentence: '{}'", sentence_text));
                             state::SHOULD_STOP.store(true, Ordering::SeqCst);

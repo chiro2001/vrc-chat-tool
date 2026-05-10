@@ -103,6 +103,12 @@ pub struct AppConfig {
     pub trigger_start: String,
     pub trigger_stop: String,
 
+    // ---- Keyboard input ----
+    #[serde(default)]
+    pub keyboard_input_enabled: bool,
+    #[serde(default)]
+    pub keyboard_input_mode: String,
+
     // ---- Hotkey ----
     pub global_hotkey_enabled: bool,
 }
@@ -132,6 +138,9 @@ impl Default for AppConfig {
             trigger_stt_provider: "local".to_string(),
             trigger_start: "开始语音识别".to_string(),
             trigger_stop: "停止语音识别".to_string(),
+
+            keyboard_input_enabled: false,
+            keyboard_input_mode: "sendinput".to_string(),
 
             global_hotkey_enabled: true,
         }

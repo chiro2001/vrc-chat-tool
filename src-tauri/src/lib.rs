@@ -7,3 +7,4 @@ pub mod trigger;
 pub mod hotkey;
 pub mod log;
 pub mod state;
+pub mod input;

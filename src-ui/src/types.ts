@@ -25,6 +25,8 @@ export interface AppConfig {
   vad_sentence_silence: number;
   vad_sub_phrase_silence: number;
   vad_min_utterance: number;
+  keyboard_input_enabled: boolean;
+  keyboard_input_mode: string;
 }
 
 export interface AudioDevice {
