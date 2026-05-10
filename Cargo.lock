@@ -7132,6 +7132,7 @@ dependencies = [
  "hmac",
  "once_cell",
  "openvr",
+ "openvr_sys",
  "rosc",
  "rusqlite",
  "serde",

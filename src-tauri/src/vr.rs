@@ -1,14 +1,13 @@
 //! SteamVR controller input monitoring (Phase 3).
 //! Runs a background thread polling OpenVR digital actions for recording toggle,
 //! with double-click detection support.
-//!
-//! Requires: SteamVR runtime installed and running.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use openvr::{init, ApplicationType};
+use openvr::input::VRActiveActionSet;
+use tauri::Manager;
 
 use crate::log;
 
@@ -16,8 +15,6 @@ static VR_ACTIVE: AtomicBool = AtomicBool::new(false);
 static VR_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Start VR controller input polling in a background thread.
-/// Uses VRApplication_Background (no rendering needed, no conflict with WebView).
-/// Exits silently if SteamVR is not running.
 pub fn start_controller_listener(app: tauri::AppHandle) {
     if VR_RUNNING.swap(true, Ordering::SeqCst) {
         log::debug("vr", "Controller listener already running");
@@ -27,7 +24,6 @@ pub fn start_controller_listener(app: tauri::AppHandle) {
     thread::spawn(move || {
         log::info("vr", "Starting VR controller listener");
 
-        // Initialize OpenVR in background mode
         let ctx = match unsafe { init(ApplicationType::Background) } {
             Ok(ctx) => {
                 log::info("vr", "OpenVR initialized (Background)");
@@ -35,31 +31,29 @@ pub fn start_controller_listener(app: tauri::AppHandle) {
                 ctx
             }
             Err(e) => {
-                log::error("vr", &format!("OpenVR init failed (SteamVR not running?): {}", e));
+                log::error("vr", &format!("OpenVR init failed: {:?}", e));
                 VR_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
         };
 
-        // Get input subsystem
-        let input = match ctx.input() {
+        let mut input = match ctx.input() {
             Ok(i) => i,
             Err(e) => {
-                log::error("vr", &format!("OpenVR input subsystem failed: {}", e));
+                log::error("vr", &format!("Input subsystem failed: {:?}", e));
                 VR_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
         };
 
-        // Set action manifest
         if let Err(e) = input.set_action_manifest(std::path::Path::new("action_manifest.json")) {
-            log::warn("vr", &format!("Failed to set action manifest: {}", e));
+            log::warn("vr", &format!("Failed to set action manifest: {:?}", e));
         }
 
         let toggle_handle = match input.get_action_handle("/actions/main/in/ToggleRecording") {
             Ok(h) => h,
             Err(e) => {
-                log::error("vr", &format!("Action handle failed: {}", e));
+                log::error("vr", &format!("Action handle failed: {:?}", e));
                 VR_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
@@ -68,42 +62,43 @@ pub fn start_controller_listener(app: tauri::AppHandle) {
         let main_set = match input.get_action_set_handle("/actions/main") {
             Ok(h) => h,
             Err(e) => {
-                log::error("vr", &format!("Action set handle failed: {}", e));
+                log::error("vr", &format!("Action set handle failed: {:?}", e));
                 VR_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
         };
 
-        // Double-click detector
+        let mut active_set = VRActiveActionSet(openvr_sys::VRActiveActionSet_t {
+            ulActionSet: main_set.0,
+            ulRestrictedToDevice: openvr_sys::k_ulInvalidInputValueHandle,
+            ulSecondaryActionSet: 0,
+            unPadding: 0,
+            nPriority: 0,
+        });
+
+        let no_restrict = openvr::input::VRInputValueHandle(openvr_sys::k_ulInvalidInputValueHandle);
+
         let mut last_press: Option<Instant> = None;
         const DOUBLE_CLICK_MS: u64 = 400;
 
-        // Poll loop (20 Hz)
         loop {
             if !VR_RUNNING.load(Ordering::Relaxed) {
                 break;
             }
 
-            match input.update_actions(&mut [
-                openvr::input::VRActiveActionSet::new(main_set),
-            ]) {
-                Ok(()) => {}
-                Err(e) => {
-                    log::error("vr", &format!("Update actions failed: {}", e));
-                    std::thread::sleep(Duration::from_millis(500));
-                    continue;
-                }
+            if let Err(e) = input.update_actions(&mut [active_set]) {
+                log::error("vr", &format!("Update actions failed: {:?}", e));
+                std::thread::sleep(Duration::from_millis(500));
+                continue;
             }
 
-            match input.get_digital_action_data(toggle_handle, openvr::input::VRActiveActionSet::new(main_set)) {
+            match input.get_digital_action_data(toggle_handle, no_restrict) {
                 Ok(data) => {
-                    if data.b_state && data.b_changed {
-                        // Double-click detection
+                    if data.0.bState && data.0.bChanged {
                         let now = Instant::now();
                         let is_double = last_press
                             .map(|t| now.duration_since(t).as_millis() < DOUBLE_CLICK_MS as u128)
                             .unwrap_or(false);
-
                         last_press = Some(now);
 
                         if is_double {
@@ -113,7 +108,7 @@ pub fn start_controller_listener(app: tauri::AppHandle) {
                     }
                 }
                 Err(e) => {
-                    log::error("vr", &format!("Get action data failed: {}", e));
+                    log::error("vr", &format!("Get action data failed: {:?}", e));
                 }
             }
 
@@ -125,12 +120,10 @@ pub fn start_controller_listener(app: tauri::AppHandle) {
     });
 }
 
-/// Stop the VR controller listener.
 pub fn stop_controller_listener() {
     VR_RUNNING.store(false, Ordering::SeqCst);
 }
 
-/// Check if VR controller listener is currently active.
 pub fn is_vr_active() -> bool {
     VR_ACTIVE.load(Ordering::Relaxed)
 }
