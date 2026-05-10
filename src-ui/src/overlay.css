@@ -1,8 +1,7 @@
-/* Overlay styles — transparent, frameless, draggable */
+/* Overlay styles — transparent, frameless */
 html, body, #overlay-root {
   height: 100%;
   width: 100%;
-  -webkit-app-region: drag;
 }
 
 * {
@@ -28,7 +27,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  -webkit-app-region: drag;
+  cursor: move;
 }
 
 .overlay-idle {
