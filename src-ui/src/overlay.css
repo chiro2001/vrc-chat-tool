@@ -1,4 +1,10 @@
-/* Overlay styles — transparent, frameless, drag-through */
+/* Overlay styles — transparent, frameless, draggable */
+html, body, #overlay-root {
+  height: 100%;
+  width: 100%;
+  -webkit-app-region: drag;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -10,7 +16,6 @@ body {
   font-family: "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
   user-select: none;
-  margin: 0;
 }
 
 .overlay-container {
@@ -19,11 +24,10 @@ body {
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
   color: #e0e0e0;
-  min-height: 100px;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  cursor: grab;
   -webkit-app-region: drag;
 }
 
