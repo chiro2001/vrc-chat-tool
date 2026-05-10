@@ -1,0 +1,15 @@
+{
+    "source": "builtin",
+    "applications": [{
+        "app_key": "com.vrcchattool.overlay",
+        "launch_type": "binary",
+        "binary_path_windows": "vrc-chat-hud.exe",
+        "is_dashboard_overlay": true,
+        "strings": {
+            "en_us": {
+                "name": "VRC Chat Tool",
+                "description": "Voice-to-text overlay and dashboard for VRChat"
+            }
+        }
+    }]
+}
