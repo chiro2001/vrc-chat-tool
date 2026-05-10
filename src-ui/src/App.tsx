@@ -73,6 +73,7 @@ function App() {
     global_hotkey_enabled: true,
     trigger_listener_enabled: false,
     trigger_stt_provider: "local",
+    asr_backend: "sherpa-onnx",
   });
 
   // Credential form state
@@ -124,8 +125,8 @@ function App() {
 
   // Check STT model status when local_embedded is selected
   useEffect(() => {
-      if (config.asr_provider === "local_embedded" || config.asr_provider === "local_embedded_hybrid"
-       || config.trigger_stt_provider === "local_embedded" || config.trigger_stt_provider === "local_embedded_hybrid") {
+      if (config.asr_provider === "local_embedded"
+       || config.trigger_stt_provider === "local_embedded") {
       invoke<SttModelStatus>("check_stt_model", { sttConfigPath: config.stt_config_path })
         .then((status) => {
           setModelStatus(status);

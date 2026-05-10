@@ -16,6 +16,7 @@ export interface AppConfig {
   global_hotkey_enabled: boolean;
   trigger_listener_enabled: boolean;
   trigger_stt_provider: string;
+  asr_backend: string;
 }
 
 export interface AudioDevice {

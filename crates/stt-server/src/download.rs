@@ -361,6 +361,38 @@ where
         )?;
     }
 
+    // Download SenseVoice model for hybrid mode
+    if config.asr.backend == "hybrid" {
+        let sv_dir = &config.asr.sv_model_dir;
+        let sv_parent = sv_dir.parent().unwrap_or(std::path::Path::new("."));
+        std::fs::create_dir_all(sv_dir)
+            .context("Failed to create SenseVoice model directory")?;
+
+        let sv_name = sv_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "sherpa-onnx-sense-voice".to_string());
+
+        let sv_files = vec![
+            config.asr.sv_model.as_str(),
+            config.asr.sv_tokens.as_str(),
+        ];
+        let sv_url = format!(
+            "{}/asr-models/{}.tar.bz2",
+            RELEASES_BASE, sv_name,
+        );
+        eprintln!("[download] SenseVoice URL: {}", sv_url);
+        download_single_model_with_progress(
+            &sv_url,
+            &sv_name,
+            sv_parent,  // Extract to parent dir (models/), not into sv_dir itself
+            &sv_files,
+            force,
+            on_progress,
+            "sv",
+        )?;
+    }
+
     eprintln!("[download] Download complete, all models verified.");
     on_progress("complete", 0, 0);
     Ok(())

@@ -52,7 +52,7 @@ fn main() {
     }
 
     if config.trigger_listener_enabled
-        && (config.trigger_stt_provider == "local_embedded" || config.trigger_stt_provider == "local_embedded_hybrid" || !config.local_stt_url.is_empty())
+        && (config.trigger_stt_provider == "local_embedded" || !config.local_stt_url.is_empty())
     {
         log::info("main", &format!(
             "Starting trigger listener (provider: {}, url: {})",
@@ -183,6 +183,7 @@ fn main() {
             commands::stt::download_stt_model,
             commands::stt::get_available_models,
             commands::stt::set_stt_model,
+            commands::stt::set_stt_backend,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,6 +8,7 @@ use vrc_chat_tool::config::AppConfig;
 use vrc_chat_tool::osc::sender::OscSender;
 use vrc_chat_tool::speech::streaming::StreamingRecognizer;
 use vrc_chat_tool::trigger;
+use stt_server::Config as SttConfig;
 
 static SHOULD_STOP_E2E: AtomicBool = AtomicBool::new(false);
 
@@ -186,6 +187,54 @@ pub fn run_e2e_server() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
                 let _ = request.respond(Response::from_string(response).with_header(cors_header));
+            }
+
+            (Method::Get, "/model/status") => {
+                let stt_cfg = match SttConfig::from_file(&config.stt_config_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let json = serde_json::json!({"status":"error","message":format!("{}",e)}).to_string();
+                        let _ = request.respond(Response::from_string(json).with_status_code(500).with_header(cors_header));
+                        continue;
+                    }
+                };
+                let backend = &stt_cfg.asr.backend;
+                let exists = stt_cfg.validate_model_paths().is_ok();
+                let json = serde_json::json!({
+                    "status": "ok",
+                    "exists": exists,
+                    "backend": backend,
+                    "model_dir": stt_cfg.model_dir().to_string_lossy(),
+                }).to_string();
+                let _ = request.respond(Response::from_string(json).with_header(cors_header));
+            }
+
+            (Method::Post, "/model/download") => {
+                let stt_config_path = config.stt_config_path.clone();
+                let json = serde_json::json!({"status":"ok","message":"download started"}).to_string();
+                let _ = request.respond(Response::from_string(json).with_header(cors_header));
+
+                thread::spawn(move || {
+                    let stt_cfg = match SttConfig::from_file(&stt_config_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("[E2E] model download: failed to load config: {}", e);
+                            return;
+                        }
+                    };
+                    eprintln!("[E2E] Starting model download (backend: {})...", stt_cfg.asr.backend);
+                    match stt_server::download_models_with_progress(
+                        &stt_cfg,
+                        false,
+                        true,
+                        &|phase, current, total| {
+                            eprintln!("[E2E] download progress: {} {}/{}", phase, current, total);
+                        },
+                    ) {
+                        Ok(()) => eprintln!("[E2E] Model download complete"),
+                        Err(e) => eprintln!("[E2E] Model download failed: {}", e),
+                    }
+                });
             }
 
             _ => {

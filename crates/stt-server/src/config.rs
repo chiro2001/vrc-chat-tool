@@ -314,9 +314,9 @@ impl Config {
         self.asr_model_path().join(&self.asr.tokens)
     }
 
-    /// Full path to the CTC model file (model.int8.onnx).
+    /// Full path to the CTC model file (uses encoder filename from config).
     pub fn resolved_ctc_model(&self) -> PathBuf {
-        self.asr.ctc_model_dir.join("model.int8.onnx")
+        self.asr.ctc_model_dir.join(&self.asr.encoder)
     }
 
     /// Full path to the CTC tokens file (tokens.txt).
