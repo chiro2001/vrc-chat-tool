@@ -74,7 +74,7 @@ function App() {
     osc_remove_period: true,
     osc_enabled: true,
     trigger_start: "开始语音识别",
-    trigger_stop: "结束语音识别",
+    trigger_stop: "停止语音识别",
     asr_provider: "tencent",
     local_stt_url: "ws://192.168.101.7:8765",
     stt_config_path: "stt-config.yaml",
@@ -450,6 +450,12 @@ function App() {
         )}
 
         <div className="action-buttons">
+          {config.trigger_listener_enabled && (
+            <div className="stt-status">
+              <span className={`stt-dot stt-${getSttStatusClass(sttStatus)}`} />
+              <span className="stt-text">{getSttStatusText(sttStatus)}</span>
+            </div>
+          )}
           <button className="test-modal-trigger" onClick={() => { loadRecordings(); setShowTestModal(true); }}>
             {t("test.title")}
           </button>
@@ -457,13 +463,6 @@ function App() {
             {t("config.title")}
           </button>
         </div>
-
-        {config.trigger_listener_enabled && (
-          <div className="stt-status">
-            <span className={`stt-dot stt-${getSttStatusClass(sttStatus)}`} />
-            <span className="stt-text">{getSttStatusText(sttStatus)}</span>
-          </div>
-        )}
 
       </section>
 

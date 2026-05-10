@@ -131,7 +131,7 @@ impl Default for AppConfig {
             trigger_listener_enabled: false,
             trigger_stt_provider: "local".to_string(),
             trigger_start: "开始语音识别".to_string(),
-            trigger_stop: "结束语音识别".to_string(),
+            trigger_stop: "停止语音识别".to_string(),
 
             global_hotkey_enabled: true,
         }

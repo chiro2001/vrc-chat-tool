@@ -85,7 +85,10 @@ pub fn is_trigger_detected() -> bool {
 }
 
 pub fn last_trigger_text() -> String {
-    TRIGGER_STATE.lock().unwrap().last_trigger_text.clone()
+    let mut state = TRIGGER_STATE.lock().unwrap();
+    let text = state.last_trigger_text.clone();
+    state.last_trigger_text.clear();
+    text
 }
 
 /// Drain all heard texts from the trigger listener (for UI echo).
