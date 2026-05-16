@@ -42,8 +42,8 @@ impl OverlayRenderer {
     ) -> anyhow::Result<()> {
         self.clear_background(false);
 
-        let font_size = 24.0 * self.scale;
-        let small_size = 18.0 * self.scale;
+        let font_size = 48.0 * self.scale;
+        let small_size = 36.0 * self.scale;
         let mut y: f32 = 8.0 * self.scale;
 
         // Status indicator
@@ -88,7 +88,7 @@ impl OverlayRenderer {
     ) -> anyhow::Result<()> {
         self.clear_background(true);
 
-        let font_size = 20.0 * self.scale;
+        let font_size = 40.0 * self.scale;
         self.render_text("等待主程序连接...", font_size, 12.0 * self.scale, 4.0 * self.scale, [180, 180, 180, 200]);
 
         overlay
