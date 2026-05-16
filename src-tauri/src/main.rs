@@ -76,6 +76,20 @@ fn spawn_vr_hud() {
 fn kill_vr_hud() {
     if let Some(mut child) = HUD_CHILD.lock().unwrap().take() {
         log::info("main", "Shutting down VR HUD");
+        let pid = child.id();
+        // Send Ctrl+C for graceful shutdown (triggers OpenVR cleanup)
+        unsafe { winapi::um::wincon::GenerateConsoleCtrlEvent(0, pid); }
+        // Wait up to 3s for graceful exit, then force kill
+        for _ in 0..30 {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    log::info("main", "VR HUD exited gracefully");
+                    return;
+                }
+                _ => std::thread::sleep(std::time::Duration::from_millis(100)),
+            }
+        }
+        log::warn("main", "VR HUD did not exit, force killing");
         let _ = child.kill();
         let _ = child.wait();
     }
