@@ -19,29 +19,11 @@ use openvr::{tracked_device_index, TrackingUniverseOrigin};
 use openvr::pose::Matrix3x4;
 use state::OverlayState;
 
-/// Try multiple OpenVR application types to find one that works.
+/// Initialize OpenVR as Overlay application type.
 fn init_openvr() -> anyhow::Result<openvr::Context> {
-    let types: &[(openvr::ApplicationType, &str)] = &[
-        (openvr::ApplicationType::Scene, "Scene"),
-        (openvr::ApplicationType::Overlay, "Overlay"),
-        (openvr::ApplicationType::Utility, "Utility"),
-        (openvr::ApplicationType::Other, "Other"),
-    ];
-    let mut last_err = String::new();
-    for (ty, name) in types {
-        tracing::info!("Trying OpenVR init as {}...", name);
-        match unsafe { openvr::init(*ty) } {
-            Ok(ctx) => {
-                tracing::info!("OpenVR initialized as {}", name);
-                return Ok(ctx);
-            }
-            Err(e) => {
-                tracing::warn!("OpenVR init as {} failed: {:?}", name, e);
-                last_err = format!("{:?}", e);
-            }
-        }
-    }
-    anyhow::bail!("All OpenVR app types failed: {}", last_err)
+    tracing::info!("Initializing OpenVR as Overlay...");
+    unsafe { openvr::init(openvr::ApplicationType::Overlay) }
+        .map_err(|e| anyhow::anyhow!("OpenVR init failed: {:?}", e))
 }
 
 fn main() -> anyhow::Result<()> {
