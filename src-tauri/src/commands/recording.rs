@@ -10,6 +10,12 @@ use vrc_chat_tool::log;
 use vrc_chat_tool::state;
 use crate::history;
 
+use vrc_chat_tool::i18n;
+
+fn model_display_name(provider: &str, config: &config::AppConfig) -> String {
+    i18n::provider_short(provider, &config.language)
+}
+
 /// Track active speech duration for Tencent billing estimate
 struct TencentUsageTracker {
     active_samples: u64,    // cumulative speech samples detected
@@ -65,11 +71,13 @@ pub(crate) fn start_recording_inner(
 
         // Update overlay IPC status
         *vrc_chat_tool::ipc_server::OVERLAY_MSG.lock().unwrap() = vrc_chat_tool::ipc_server::OverlayMessage {
-            status: "recording".into(),
-            text: String::new(),
-            sentence: String::new(),
-            volume: 0.0,
-            model: model_name.to_string(),
+            msg_type: "data".into(),
+            status: Some("recording".into()),
+            text: None,
+            sentence: None,
+            volume: Some(0.0),
+            model: Some(model_display_name(&cfg.asr_provider, &cfg)),
+            ..Default::default()
         };
 
         // VAD-based usage tracking for Tencent
@@ -152,7 +160,7 @@ pub(crate) fn start_recording_inner(
 
                         // Update overlay IPC volume
                         if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                            msg.volume = volume;
+                            msg.volume = Some(volume);
                         }
 
                         // Track VAD-based speech duration for Tencent billing
@@ -206,8 +214,8 @@ pub(crate) fn start_recording_inner(
                         if !kb {
                             let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
                             if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                                msg.status = "recognizing".into();
-                                msg.text = partial_text.to_string();
+                                msg.status = Some("recognizing".into());
+                                msg.text = Some(partial_text.to_string());
                             }
                             if let Some(ref osc) = osc_for_partial {
                                 let _ = osc.send_partial(partial_text);
@@ -236,7 +244,7 @@ pub(crate) fn start_recording_inner(
                         if clean_text.is_empty() { return; }
                         let _ = app_sentence.emit_all("recording-sentence", clean_text.clone());
                         if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                            msg.sentence = clean_text.clone();
+                            msg.sentence = Some(clean_text.clone());
                         }
                         if let Some(ref osc) = osc_s {
                             let _ = osc.send_chatbox(&clean_text);
@@ -285,9 +293,9 @@ pub(crate) fn start_recording_inner(
                 let _ = app.emit_all("recording-complete", text);
                 // Reset overlay IPC to idle
                 if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                    msg.status = "idle".into();
-                    msg.text.clear();
-                    msg.volume = 0.0;
+                    msg.status = Some("idle".into());
+                    msg.text = None;
+                    msg.volume = Some(0.0);
                 }
             }
             Err(e) => {

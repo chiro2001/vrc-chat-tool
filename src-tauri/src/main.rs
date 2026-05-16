@@ -113,6 +113,14 @@ fn main() {
 
     // Start overlay IPC server (for VR HUD)
     vrc_chat_tool::ipc_server::start_overlay_ipc();
+    vrc_chat_tool::ipc_server::set_hud_config(
+        config.vr_hud.opacity,
+        config.vr_hud.scale,
+        config.vr_hud.smoothing,
+        config.vr_hud.pos_x,
+        config.vr_hud.pos_y,
+        config.vr_hud.pos_z,
+    );
 
     // Spawn VR HUD companion process
     let _hud_child = spawn_vr_hud();

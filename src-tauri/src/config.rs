@@ -71,11 +71,51 @@ fn load_dotenv() {
     }
 }
 
+/// VR HUD configuration — sent to vrc-chat-hud.exe via IPC.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VrHudConfig {
+    #[serde(default = "default_hud_opacity")]
+    pub opacity: f32,
+    #[serde(default = "default_hud_scale")]
+    pub scale: f32,
+    #[serde(default = "default_hud_smoothing")]
+    pub smoothing: f32,
+    #[serde(default = "default_hud_pos_x")]
+    pub pos_x: f32,
+    #[serde(default = "default_hud_pos_y")]
+    pub pos_y: f32,
+    #[serde(default = "default_hud_pos_z")]
+    pub pos_z: f32,
+}
+
+fn default_hud_opacity() -> f32 { 0.85 }
+fn default_hud_scale() -> f32 { 1.0 }
+fn default_hud_smoothing() -> f32 { 0.10 }
+fn default_hud_pos_x() -> f32 { -0.4 }
+fn default_hud_pos_y() -> f32 { 0.3 }
+fn default_hud_pos_z() -> f32 { -1.5 }
+fn default_language() -> String { "zh".into() }
+
+impl Default for VrHudConfig {
+    fn default() -> Self {
+        Self {
+            opacity: default_hud_opacity(),
+            scale: default_hud_scale(),
+            smoothing: default_hud_smoothing(),
+            pos_x: default_hud_pos_x(),
+            pos_y: default_hud_pos_y(),
+            pos_z: default_hud_pos_z(),
+        }
+    }
+}
+
 /// Application configuration — stored in config.yaml (gitignored).
 /// Credentials are loaded from .env on startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    // ---- ASR ----
+    // ---- General ----
+    #[serde(default = "default_language")]
+    pub language: String,
     pub asr_provider: String,
     pub asr_backend: String,
     pub onnx_provider: String,
@@ -117,6 +157,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub vr_controller_enabled: bool,
 
+    // ---- VR HUD ----
+    #[serde(default)]
+    pub vr_hud: VrHudConfig,
+
     // ---- Hotkey ----
     pub global_hotkey_enabled: bool,
 }
@@ -124,6 +168,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            language: "zh".to_string(),
             asr_provider: "local_embedded".to_string(),
             asr_backend: "hybrid".to_string(),
             onnx_provider: "cpu".to_string(),
@@ -151,6 +196,7 @@ impl Default for AppConfig {
             keyboard_input_mode: "sendinput".to_string(),
             floating_window_enabled: true,
             vr_controller_enabled: false,
+            vr_hud: VrHudConfig::default(),
 
             global_hotkey_enabled: true,
         }

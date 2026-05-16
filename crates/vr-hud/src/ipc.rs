@@ -1,95 +1,136 @@
-//! Named pipe IPC client for receiving overlay data from the main process.
+//! Named pipe IPC client — duplex, handshake, bye handling.
+//!
+//! Protocol:
+//!   1. Connect to pipe
+//!   2. Receive {"type":"hello"} → respond {"type":"ack"}
+//!   3. Receive {"type":"config", ...} → apply config
+//!   4. Receive {"type":"data", ...} → partial state update
+//!   5. Receive {"type":"bye"} → trigger graceful shutdown
 
 use serde::{Deserialize, Serialize};
-use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
+use winapi::um::fileapi::{CreateFileA, ReadFile, WriteFile, OPEN_EXISTING};
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::namedpipeapi::SetNamedPipeHandleState;
-use winapi::um::winbase::{PIPE_READMODE_MESSAGE, PIPE_NOWAIT, FILE_FLAG_OVERLAPPED, WaitNamedPipeA};
+use winapi::um::winbase::{
+    PIPE_READMODE_MESSAGE, PIPE_NOWAIT, FILE_FLAG_OVERLAPPED,
+    WaitNamedPipeA,
+};
 use winapi::shared::winerror::ERROR_PIPE_BUSY;
 use winapi::ctypes::c_void;
 
 /// Message from main process to overlay.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// All fields optional — HUD only updates what's present.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OverlayMessage {
-    pub status: String,         // "idle" | "recording" | "recognizing"
-    pub text: String,           // current recognition text
-    pub sentence: String,       // last completed sentence
-    pub volume: f32,            // 0.0 - 1.0
-    pub model: String,          // current ASR model name
+    #[serde(rename = "type", default)]
+    pub msg_type: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub visible: Option<bool>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub sentence: Option<String>,
+    #[serde(default)]
+    pub volume: Option<f32>,
+    #[serde(default)]
+    pub model: Option<String>,
+    // HUD config
+    #[serde(default)]
+    pub opacity: Option<f32>,
+    #[serde(default)]
+    pub scale: Option<f32>,
+    #[serde(default)]
+    pub smoothing: Option<f32>,
+    #[serde(default)]
+    pub pos_x: Option<f32>,
+    #[serde(default)]
+    pub pos_y: Option<f32>,
+    #[serde(default)]
+    pub pos_z: Option<f32>,
 }
+
+/// Enum for parsed messages.
+pub enum HudEvent {
+    Connected,
+    Bye,
+    Data(OverlayMessage),
+    Config(OverlayMessage),
+}
+
 pub struct IpcClient {
     handle: *mut c_void,
     buffer: Vec<u8>,
 }
 
 impl IpcClient {
-    /// Connect to the named pipe server (main process).
     pub fn connect(pipe_name: &str) -> anyhow::Result<Self> {
         let name = std::ffi::CString::new(pipe_name)?;
 
-        // Wait for pipe server
-        loop {
-            let handle = unsafe {
+        let handle = loop {
+            let h = unsafe {
                 CreateFileA(
                     name.as_ptr(),
-                    0x80000000, // GENERIC_READ
-                    0,          // no sharing
-                    std::ptr::null_mut(),
+                    0xC0000000, // GENERIC_READ | GENERIC_WRITE
+                    0, std::ptr::null_mut(),
                     OPEN_EXISTING,
                     FILE_FLAG_OVERLAPPED,
                     std::ptr::null_mut(),
                 )
             };
 
-            if handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
-                // Set non-blocking message-read mode
+            if h != winapi::um::handleapi::INVALID_HANDLE_VALUE {
                 unsafe {
                     let mut mode: u32 = PIPE_READMODE_MESSAGE | PIPE_NOWAIT;
-                    SetNamedPipeHandleState(handle, &mut mode, std::ptr::null_mut(), std::ptr::null_mut());
+                    SetNamedPipeHandleState(h, &mut mode, std::ptr::null_mut(), std::ptr::null_mut());
                 }
-                return Ok(Self {
-                    handle,
-                    buffer: vec![0u8; 4096],
-                });
+                break h;
             }
 
             let err = unsafe { winapi::um::errhandlingapi::GetLastError() };
             if err != ERROR_PIPE_BUSY {
-                anyhow::bail!("Failed to connect to pipe (error {})", err);
+                anyhow::bail!("Pipe connect failed (error {})", err);
             }
+            unsafe { WaitNamedPipeA(name.as_ptr(), 5000); }
+        };
 
-            // Wait and retry
-            if unsafe { WaitNamedPipeA(name.as_ptr(), 5000) } == 0 {
-                anyhow::bail!("Pipe server not available after timeout");
-            }
+        Ok(Self { handle, buffer: vec![0u8; 4096] })
+    }
+
+    /// Send an ack response to the server.
+    pub fn send_ack(&self) {
+        let ack = b"{\"type\":\"ack\"}\n";
+        let mut written: u32 = 0;
+        unsafe {
+            WriteFile(self.handle, ack.as_ptr() as *const c_void, ack.len() as u32, &mut written, std::ptr::null_mut());
         }
     }
 
-    /// Poll for new messages. Calls `on_message` for each complete JSON message received.
-    pub fn poll<F: FnMut(OverlayMessage)>(&mut self, mut on_message: F) {
+    /// Poll for incoming messages. Returns parsed events.
+    pub fn poll(&mut self) -> Vec<HudEvent> {
+        let mut events = Vec::new();
         let mut bytes_read: u32 = 0;
         let result = unsafe {
-            winapi::um::fileapi::ReadFile(
-                self.handle,
-                self.buffer.as_mut_ptr() as *mut c_void,
-                self.buffer.len() as u32,
-                &mut bytes_read,
-                std::ptr::null_mut(),
-            )
+            ReadFile(self.handle, self.buffer.as_mut_ptr() as *mut c_void, self.buffer.len() as u32, &mut bytes_read, std::ptr::null_mut())
         };
 
         if result != 0 && bytes_read > 0 {
             let data = &self.buffer[..bytes_read as usize];
-            // Messages are newline-delimited JSON
             for line in data.split(|&b| b == b'\n') {
-                if line.is_empty() {
-                    continue;
-                }
+                if line.is_empty() { continue; }
                 if let Ok(msg) = serde_json::from_slice::<OverlayMessage>(line) {
-                    on_message(msg);
+                    match msg.msg_type.as_str() {
+                        "hello" => events.push(HudEvent::Connected),
+                        "bye" => events.push(HudEvent::Bye),
+                        "config" => events.push(HudEvent::Config(msg)),
+                        _ => events.push(HudEvent::Data(msg)),
+                    }
                 }
             }
         }
+
+        events
     }
 }
 
@@ -101,6 +142,5 @@ impl Drop for IpcClient {
     }
 }
 
-// SAFETY: Pipe handle is Send + Sync across threads
 unsafe impl Send for IpcClient {}
 unsafe impl Sync for IpcClient {}

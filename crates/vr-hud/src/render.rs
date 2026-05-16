@@ -20,10 +20,17 @@ impl OverlayRenderer {
         let font_data = std::fs::read("C:\\Windows\\Fonts\\simhei.ttf")?;
         let font = Font::from_bytes(font_data, fontdue::FontSettings::default())
             .map_err(|e| anyhow::anyhow!("Failed to load font: {}", e))?;
-        let tex_w = (1024.0 * scale) as usize;
-        let tex_h = (256.0 * scale) as usize;
-        let pixels = vec![0u8; tex_w * tex_h * 4];
-        Ok(Self { font, pixels, scale, tex_w, tex_h })
+        let mut r = Self { font, pixels: Vec::new(), scale: 0.0, tex_w: 0, tex_h: 0 };
+        r.set_scale(scale);
+        Ok(r)
+    }
+
+    /// Change render scale — reallocates pixel buffer.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
+        self.tex_w = (1024.0 * scale) as usize;
+        self.tex_h = (256.0 * scale) as usize;
+        self.pixels = vec![0u8; self.tex_w * self.tex_h * 4];
     }
 
     /// Full HUD render (connected state).
