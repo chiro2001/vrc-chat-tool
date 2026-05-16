@@ -110,7 +110,7 @@ impl OverlayRenderer {
         &mut self,
         overlay: &mut openvr::Overlay,
         handle: OverlayHandle,
-        content_h: usize,
+        _content_h: usize,
     ) -> anyhow::Result<()> {
         // Always upload at fixed MAX_H — content renders into top, rest is transparent
         let total_bytes = self.tex_w * MAX_H * 4;
