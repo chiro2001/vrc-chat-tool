@@ -112,20 +112,12 @@ impl OverlayRenderer {
         handle: OverlayHandle,
         content_h: usize,
     ) -> anyhow::Result<()> {
-        let h = content_h.clamp(64, MAX_H);
-        let total_bytes = self.tex_w * h * 4;
-        // Fill unused rows with transparent to avoid visual artifacts
-        for i in content_h.min(MAX_H)..h {
-            let row_start = i * self.tex_w * 4;
-            for j in 0..self.tex_w {
-                let p = row_start + j * 4;
-                self.pixels[p + 3] = 0;
-            }
-        }
+        // Always upload at fixed MAX_H — content renders into top, rest is transparent
+        let total_bytes = self.tex_w * MAX_H * 4;
         let slice = &self.pixels[..total_bytes];
         overlay
-            .set_raw_data(handle, slice, self.tex_w, h, 4)
-            .map_err(|e| anyhow::anyhow!("set_raw_data({}x{}): {:?}", self.tex_w, h, e))
+            .set_raw_data(handle, slice, self.tex_w, MAX_H, 4)
+            .map_err(|e| anyhow::anyhow!("set_raw_data: {:?}", e))
     }
 
     fn clear_background(&mut self, transparent: bool) {
