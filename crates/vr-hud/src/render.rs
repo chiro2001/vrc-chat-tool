@@ -44,14 +44,18 @@ impl OverlayRenderer {
         handle: OverlayHandle,
         state: &OverlayState,
     ) -> anyhow::Result<()> {
+        // Fill the status bar area with background (erase old content)
+        let bar_h = (56.0 * self.scale) as usize;
+        self.fill_rect(0, 0, self.tex_w, bar_h.min(MAX_H));
+        // Fill content area with background
+        self.fill_rect(0, bar_h, self.tex_w, MAX_H - bar_h);
+
         let font_size = 48.0 * self.scale;
         let sep_pad = 4.0 * self.scale;
 
-        self.clear_background(false);
-
         let mut y: f32 = 4.0 * self.scale;
 
-        // ═══ Status line (always shown) ═══
+        // Status line
         let status_color = match state.status.as_str() {
             "recording" => [100u8, 220, 80, 255],
             "recognizing" => [255, 180, 50, 255],
@@ -64,32 +68,46 @@ impl OverlayRenderer {
             "recognizing" => "● 识别中",
             _ => "● 就绪",
         };
-        let status_text = format!("{}    后端: {}",
-            label, state.model);
+        let status_text = format!("{}    后端: {}", label, state.model);
         y = self.render_text(&status_text, font_size, 12.0 * self.scale, y, status_color);
 
-        // If stop — nothing else to render
         if state.status == "stop" {
-            let content_h = (y + 4.0 * self.scale) as usize;
-            return self.upload(overlay, handle, content_h);
+            return self.upload(overlay, handle, (y + 4.0 * self.scale) as usize);
         }
 
         y += sep_pad;
         self.draw_separator(y as usize);
         y += sep_pad;
 
-        // ═══ Main content — single line, sentence has priority ═══
+        // Erase the content line area before rendering new text
+        let content_top = y as usize;
+        let content_h = (font_size as usize + 8);
+        self.fill_rect(0, content_top, self.tex_w, content_h.min(MAX_H.saturating_sub(content_top)));
+
+        // Main content
         if !state.last_sentence.is_empty() {
-            // Finalized sentence (OSC result) — colored with ">" prefix
             let colored = format!("> {}", state.last_sentence);
             y = self.render_text(&colored, font_size, 12.0 * self.scale, y, [120, 220, 120, 255]);
         } else if !state.current_text.is_empty() {
-            // Live recognition — white text while waiting for sentence
             y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
         }
 
-        let content_h = (y + 4.0 * self.scale) as usize;
-        self.upload(overlay, handle, content_h)
+        self.upload(overlay, handle, (y + 4.0 * self.scale) as usize)
+    }
+
+    fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
+        let max_y = (y + h).min(MAX_H);
+        let max_x = (x + w).min(self.tex_w);
+        for row in y..max_y {
+            let start = row * self.tex_w + x;
+            let end = (row * self.tex_w + max_x).min(self.pixels.len() / 4);
+            for i in start..end {
+                self.pixels[i * 4 + 0] = 20;
+                self.pixels[i * 4 + 1] = 20;
+                self.pixels[i * 4 + 2] = 30;
+                self.pixels[i * 4 + 3] = 180;
+            }
+        }
     }
 
     /// Minimal disconnected-state render.
@@ -98,11 +116,23 @@ impl OverlayRenderer {
         overlay: &mut openvr::Overlay,
         handle: OverlayHandle,
     ) -> anyhow::Result<()> {
-        self.clear_background(true);
+        // Fill with transparent (no bg for disconnected state)
+        self.fill_rect_transparent(0, 0, self.tex_w, MAX_H);
         let font_size = 40.0 * self.scale;
         let y = self.render_text("等待主程序连接...", font_size, 12.0 * self.scale, 4.0 * self.scale, [180, 180, 180, 200]);
-        let content_h = (y + 4.0 * self.scale) as usize;
-        self.upload(overlay, handle, content_h)
+        self.upload(overlay, handle, (y + 4.0 * self.scale) as usize)
+    }
+
+    fn fill_rect_transparent(&mut self, x: usize, y: usize, w: usize, h: usize) {
+        let max_y = (y + h).min(MAX_H);
+        let max_x = (x + w).min(self.tex_w);
+        for row in y..max_y {
+            let start = row * self.tex_w + x;
+            let end = (row * self.tex_w + max_x).min(self.pixels.len() / 4);
+            for i in start..end {
+                self.pixels[i * 4 + 3] = 0;
+            }
+        }
     }
 
     /// Upload rendered content to overlay, using only the needed height (min 64px).
@@ -118,16 +148,6 @@ impl OverlayRenderer {
         overlay
             .set_raw_data(handle, slice, self.tex_w, MAX_H, 4)
             .map_err(|e| anyhow::anyhow!("set_raw_data: {:?}", e))
-    }
-
-    fn clear_background(&mut self, transparent: bool) {
-        let alpha = if transparent { 0 } else { 180 };
-        for i in 0..self.tex_w * MAX_H {
-            self.pixels[i * 4 + 0] = 20;
-            self.pixels[i * 4 + 1] = 20;
-            self.pixels[i * 4 + 2] = 30;
-            self.pixels[i * 4 + 3] = alpha;
-        }
     }
 
     fn render_text(&mut self, text: &str, size: f32, x: f32, y: f32, color: [u8; 4]) -> f32 {
