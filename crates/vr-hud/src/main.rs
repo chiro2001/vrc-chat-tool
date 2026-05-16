@@ -61,6 +61,8 @@ fn main() -> anyhow::Result<()> {
     // 4. Event loop
     let mut last_snapshot = String::new();
     let mut reconnect_backoff_ms: u64 = 1000;
+    let mut was_connected = false;
+    let mut last_visible = true;
 
     loop {
         // Poll OpenVR events
@@ -117,16 +119,20 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        // Handle visibility
+        // Handle visibility changes (only when state actually changes)
+        if connected && !was_connected {
+            let _ = overlay.set_visibility(handle, true);
+            was_connected = true;
+        } else if !connected && was_connected {
+            was_connected = false;
+        }
+
         let snap;
         {
             let s = state.lock().unwrap();
-            if connected {
-                if !s.visible {
-                    let _ = overlay.set_visibility(handle, false);
-                } else {
-                    let _ = overlay.set_visibility(handle, true);
-                }
+            if connected && s.visible != last_visible {
+                last_visible = s.visible;
+                let _ = overlay.set_visibility(handle, s.visible);
             }
             snap = if connected {
                 format!("{}|{}|{}|{:.2}|{}|{}",
