@@ -46,18 +46,30 @@ fn spawn_vr_hud() {
         Err(_) => None,
     };
     if let Some(dir) = exe_dir {
-        let hud = dir.join("vrc-chat-hud.exe");
-        if hud.exists() {
-            log::info("main", &format!("Spawning VR HUD: {}", hud.display()));
-            match Command::new(&hud).spawn() {
-                Ok(child) => {
-                    *HUD_CHILD.lock().unwrap() = Some(child);
+        // Try same dir first, then sibling release/debug dirs
+        let candidates = [
+            dir.join("vrc-chat-hud.exe"),
+            dir.parent().map(|p| p.join("release").join("vrc-chat-hud.exe")).unwrap_or_default(),
+            dir.parent().map(|p| p.join("debug").join("vrc-chat-hud.exe")).unwrap_or_default(),
+        ];
+        for hud in &candidates {
+            if hud.exists() {
+                log::info("main", &format!("Spawning VR HUD: {}", hud.display()));
+                match Command::new(hud).spawn() {
+                    Ok(child) => {
+                        *HUD_CHILD.lock().unwrap() = Some(child);
+                        return;
+                    }
+                    Err(e) => log::warn("main", &format!("Failed to spawn HUD: {}", e)),
                 }
-                Err(e) => log::warn("main", &format!("Failed to spawn HUD: {}", e)),
             }
-        } else {
-            log::warn("main", &format!("HUD binary not found: {}", hud.display()));
         }
+        log::warn("main", &format!(
+            "HUD binary not found. Tried:\n  {}\n  {}\n  {}",
+            candidates[0].display(),
+            candidates[1].display(),
+            candidates[2].display(),
+        ));
     }
 }
 

@@ -69,7 +69,8 @@ pub fn start_overlay_ipc() {
             };
 
             if handle == INVALID_HANDLE_VALUE {
-                log::error("ipc", "Failed to create named pipe");
+                let err = unsafe { winapi::um::errhandlingapi::GetLastError() };
+                log::error("ipc", &format!("CreateNamedPipe failed: {}", err));
                 break;
             }
 
