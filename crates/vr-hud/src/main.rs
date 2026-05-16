@@ -22,6 +22,7 @@ use state::OverlayState;
 /// Try multiple OpenVR application types to find one that works.
 fn init_openvr() -> anyhow::Result<openvr::Context> {
     let types: &[(openvr::ApplicationType, &str)] = &[
+        (openvr::ApplicationType::Scene, "Scene"),
         (openvr::ApplicationType::Overlay, "Overlay"),
         (openvr::ApplicationType::Utility, "Utility"),
         (openvr::ApplicationType::Other, "Other"),
@@ -45,7 +46,13 @@ fn init_openvr() -> anyhow::Result<openvr::Context> {
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    tracing::info!("vrc-chat-hud starting");
+
+    // Install Ctrl+C handler for graceful shutdown
+    ctrlc::set_handler(|| {
+        tracing::info!("Ctrl+C received, exiting");
+        std::process::exit(0);
+    }).ok();
+    tracing::info!("vrc-chat-hud starting (PID={})", std::process::id());
 
     // 1. OpenVR — try multiple app types, detect HMD first
     if !openvr::is_runtime_installed() {
@@ -58,13 +65,14 @@ fn main() -> anyhow::Result<()> {
     let ctx = init_openvr()?;
     let system = ctx.system()?;
     let mut overlay = ctx.overlay()?;
+    let overlay_key = format!("vrcchat.hud.{}", std::process::id());
     let handle = overlay
-        .create_overlay("vrcchat.hud", "VRC Chat HUD")
+        .create_overlay(&overlay_key, "VRC Chat HUD")
         .map_err(|e| anyhow::anyhow!("create_overlay: {:?}", e))?;
     overlay
         .set_width(handle, 0.6)
         .map_err(|e| anyhow::anyhow!("set_width: {:?}", e))?;
-    tracing::info!("Overlay created");
+    tracing::info!("Overlay created (key={})", overlay_key);
 
     // 2. State + renderer (default scale)
     let state = Arc::new(Mutex::new(OverlayState::default()));
