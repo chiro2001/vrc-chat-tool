@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
     // 2. Create overlay
     let mut overlay = ctx.overlay()?;
     let handle = overlay
-        .create_overlay("com.vrcchattool.hud", "VRC Chat HUD")
+        .create_overlay("vrcchat.hud", "VRC Chat HUD")
         .map_err(|e| anyhow::anyhow!("create_overlay: {:?}", e))?;
     tracing::info!("Overlay created");
 
