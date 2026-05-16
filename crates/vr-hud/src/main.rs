@@ -19,12 +19,43 @@ use openvr::{tracked_device_index, TrackingUniverseOrigin};
 use openvr::pose::Matrix3x4;
 use state::OverlayState;
 
+/// Try multiple OpenVR application types to find one that works.
+fn init_openvr() -> anyhow::Result<openvr::Context> {
+    let types: &[(openvr::ApplicationType, &str)] = &[
+        (openvr::ApplicationType::Overlay, "Overlay"),
+        (openvr::ApplicationType::Utility, "Utility"),
+        (openvr::ApplicationType::Other, "Other"),
+    ];
+    let mut last_err = String::new();
+    for (ty, name) in types {
+        tracing::info!("Trying OpenVR init as {}...", name);
+        match unsafe { openvr::init(*ty) } {
+            Ok(ctx) => {
+                tracing::info!("OpenVR initialized as {}", name);
+                return Ok(ctx);
+            }
+            Err(e) => {
+                tracing::warn!("OpenVR init as {} failed: {:?}", name, e);
+                last_err = format!("{:?}", e);
+            }
+        }
+    }
+    anyhow::bail!("All OpenVR app types failed: {}", last_err)
+}
+
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     tracing::info!("vrc-chat-hud starting");
 
-    // 1. OpenVR
-    let ctx = unsafe { openvr::init(openvr::ApplicationType::Overlay) }?;
+    // 1. OpenVR — try multiple app types, detect HMD first
+    if !openvr::is_runtime_installed() {
+        anyhow::bail!("SteamVR runtime not installed");
+    }
+    if !openvr::is_hmd_present() {
+        anyhow::bail!("HMD not detected");
+    }
+
+    let ctx = init_openvr()?;
     let system = ctx.system()?;
     let mut overlay = ctx.overlay()?;
     let handle = overlay
