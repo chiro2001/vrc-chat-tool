@@ -140,13 +140,12 @@ impl OverlayRenderer {
         &mut self,
         overlay: &mut openvr::Overlay,
         handle: OverlayHandle,
-        _content_h: usize,
+        content_h: usize,
     ) -> anyhow::Result<()> {
-        // Always upload at fixed MAX_H — content renders into top, rest is transparent
-        let total_bytes = self.tex_w * MAX_H * 4;
+        let h = content_h.clamp(64, MAX_H);
+        let total_bytes = self.tex_w * h * 4;
         let slice = &self.pixels[..total_bytes];
-        overlay
-            .set_raw_data(handle, slice, self.tex_w, MAX_H, 4)
+        overlay.set_raw_data(handle, slice, self.tex_w, h, 4)
             .map_err(|e| anyhow::anyhow!("set_raw_data: {:?}", e))
     }
 

@@ -1,13 +1,7 @@
 //! vrc-chat-hud — Standalone SteamVR overlay companion process.
 //!
-//! Architecture:
-//!   1. OpenVR init → create overlay → show "waiting" state
-//!   2. Connect to main process via named pipe
-//!   3. Handshake → receive config → enter live HUD loop
-//!   4. Event loop: poll IPC → apply data/config → smooth HMD → render
-//!
-//! Head-lag smoothing: exponential smoothing on HMD absolute pose.
-//! Config: opacity, scale, smoothing, position — from main process.
+//! Double-buffered: two overlays, one visible while the other is updated.
+//! Swap visibility to eliminate texture upload flicker.
 
 mod ipc;
 mod render;
@@ -17,229 +11,177 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use openvr::{tracked_device_index, TrackingUniverseOrigin};
 use openvr::pose::Matrix3x4;
+use openvr::overlay::OverlayHandle;
 use state::OverlayState;
 
-/// Initialize OpenVR as Overlay application type.
-fn init_openvr() -> anyhow::Result<openvr::Context> {
-    tracing::info!("Initializing OpenVR as Overlay...");
-    unsafe { openvr::init(openvr::ApplicationType::Overlay) }
-        .map_err(|e| anyhow::anyhow!("OpenVR init failed: {:?}", e))
-}
+const SMOOTHING: f32 = 0.10;
+const SCALE: f32 = 1.0;
+const POS_X: f32 = -0.4;
+const POS_Y: f32 = 0.3;
+const POS_Z: f32 = -1.5;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Install Ctrl+C handler for graceful shutdown
     ctrlc::set_handler(|| {
         tracing::info!("Ctrl+C received, exiting");
         std::process::exit(0);
     }).ok();
     tracing::info!("vrc-chat-hud starting (PID={})", std::process::id());
 
-    // 1. OpenVR — try multiple app types, detect HMD first
-    if !openvr::is_runtime_installed() {
-        anyhow::bail!("SteamVR runtime not installed");
-    }
-    if !openvr::is_hmd_present() {
-        anyhow::bail!("HMD not detected");
-    }
+    if !openvr::is_runtime_installed() { anyhow::bail!("SteamVR not installed"); }
+    if !openvr::is_hmd_present() { anyhow::bail!("HMD not detected"); }
 
-    let ctx = init_openvr()?;
+    let ctx = unsafe { openvr::init(openvr::ApplicationType::Overlay) }?;
     let system = ctx.system()?;
     let mut overlay = ctx.overlay()?;
-    let overlay_key = format!("vrcchat.hud.{}", std::process::id());
-    let handle = overlay
-        .create_overlay(&overlay_key, "VRC Chat HUD")
-        .map_err(|e| anyhow::anyhow!("create_overlay: {:?}", e))?;
-    overlay
-        .set_width(handle, 0.6)
-        .map_err(|e| anyhow::anyhow!("set_width: {:?}", e))?;
-    tracing::info!("Overlay created (key={})", overlay_key);
 
-    // 2. State + renderer (default scale)
-    let state = Arc::new(Mutex::new(OverlayState::default()));
-    let mut renderer = render::OverlayRenderer::new(state.lock().unwrap().scale)?;
+    // Create two overlays for double buffering
+    let pid = std::process::id();
+    let ha = overlay.create_overlay(&format!("vrcchat.hud.{}.a", pid), "VRC Chat HUD")
+        .map_err(|e| anyhow::anyhow!("create_overlay A: {:?}", e))?;
+    let hb = overlay.create_overlay(&format!("vrcchat.hud.{}.b", pid), "VRC Chat HUD B")
+        .map_err(|e| anyhow::anyhow!("create_overlay B: {:?}", e))?;
 
-    // Show disconnected state
-    renderer.render_disconnected(&mut overlay, handle)?;
-    overlay
-        .set_opacity(handle, 0.85)
-        .map_err(|e| anyhow::anyhow!("set_opacity: {:?}", e))?;
-    overlay
-        .set_visibility(handle, true)
-        .map_err(|e| anyhow::anyhow!("show_overlay: {:?}", e))?;
-    tracing::info!("Overlay visible (disconnected)");
-
-    // Initial smoothed HMD pose
-    let mut smoothed = [[1.0f32, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
-    if let Some(p) = get_hmd_pose(&system) {
-        smoothed = p;
+    for &h in &[ha, hb] {
+        overlay.set_width(h, 0.6).map_err(|e| anyhow::anyhow!("set_width: {:?}", e))?;
+        overlay.set_opacity(h, 0.85).map_err(|e| anyhow::anyhow!("set_opacity: {:?}", e))?;
     }
 
-    // 3. Connect to main process
-    let (mut ipc, mut connected) = connect_to_server();
+    let state = Arc::new(Mutex::new(OverlayState::default()));
+    let mut renderer = render::OverlayRenderer::new(SCALE)?;
 
-    // 4. Event loop
+    // Show A (disconnected), hide B
+    renderer.render_disconnected(&mut overlay, ha)?;
+    overlay.set_visibility(ha, true).map_err(|e| anyhow::anyhow!("show A: {:?}", e))?;
+    overlay.set_visibility(hb, false).map_err(|e| anyhow::anyhow!("hide B: {:?}", e))?;
+
+    let mut active = ha;   // currently visible
+    let mut inactive = hb; // hidden, used for rendering
+
+    // Initial HMD pose
+    let mut smoothed = [[1.0f32, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+    if let Some(p) = get_hmd_pose(&system) { smoothed = p; }
+
+    let (mut ipc, mut connected) = connect_to_server();
     let mut last_snapshot = String::new();
-    let mut reconnect_backoff_ms: u64 = 1000;
+    let mut reconnect_ms: u64 = 1000;
     let mut was_connected = false;
     let mut last_visible = true;
 
     loop {
-        // Poll OpenVR events
-        while let Some(_event) = system.poll_next_event() {}
+        while let Some(_) = system.poll_next_event() {}
 
-        // Poll IPC (if connected)
         if connected {
             if let Some(ref mut c) = ipc {
-                for event in c.poll() {
-                    match event {
-                        ipc::HudEvent::Bye => {
-                            tracing::info!("Received bye, shutting down");
-                            return Ok(());
-                        }
+                for evt in c.poll() {
+                    match evt {
+                        ipc::HudEvent::Bye => return Ok(()),
                         ipc::HudEvent::Config(msg) => {
                             let mut s = state.lock().unwrap();
                             s.apply_config(&msg);
                             renderer.set_scale(s.scale);
-                            overlay
-                                .set_opacity(handle, s.opacity)
-                                .map_err(|e| tracing::warn!("set_opacity: {:?}", e))
-                                .ok();
-                            tracing::info!(
-                                "Config: opacity={:.2} scale={:.1} smoothing={:.2} pos=({:.2},{:.2},{:.2})",
-                                s.opacity, s.scale, s.smoothing, s.pos_x, s.pos_y, s.pos_z
-                            );
+                            for &h in &[ha, hb] {
+                                overlay.set_opacity(h, s.opacity)
+                                    .map_err(|e| tracing::warn!("set_opacity: {:?}", e)).ok();
+                            }
                         }
-                        ipc::HudEvent::Data(msg) => {
-                            let mut s = state.lock().unwrap();
-                            s.update(&msg);
-                        }
+                        ipc::HudEvent::Data(msg) => state.lock().unwrap().update(&msg),
                         _ => {}
                     }
                 }
-            } else {
-                // Pipe disconnected, go back to waiting
-                connected = false;
-                tracing::warn!("Pipe lost, reconnecting...");
-            }
+            } else { connected = false; }
         } else {
-            // Not connected — retry with backoff
-            std::thread::sleep(Duration::from_millis(reconnect_backoff_ms));
-            reconnect_backoff_ms = (reconnect_backoff_ms * 2).min(16000);
-            let result = connect_to_server();
-            ipc = result.0;
-            connected = result.1;
-            if connected {
-                reconnect_backoff_ms = 1000;
-            }
+            std::thread::sleep(Duration::from_millis(reconnect_ms));
+            reconnect_ms = (reconnect_ms * 2).min(16000);
+            let (c, ok) = connect_to_server();
+            ipc = c; connected = ok;
+            if ok { reconnect_ms = 1000; }
         }
 
-        // Handle visibility changes (only when state actually changes)
+        // Visibility transitions
         if connected && !was_connected {
-            let _ = overlay.set_visibility(handle, true);
+            for &h in &[ha, hb] { let _ = overlay.set_visibility(h, true); }
             was_connected = true;
-        } else if !connected && was_connected {
-            was_connected = false;
         }
 
         let snap;
         {
             let s = state.lock().unwrap();
-            if connected && s.visible != last_visible {
+            if s.visible != last_visible {
                 last_visible = s.visible;
-                let _ = overlay.set_visibility(handle, s.visible);
+                let v = s.visible && connected;
+                let _ = overlay.set_visibility(active, v);
+                if !v { let _ = overlay.set_visibility(inactive, false); }
             }
             snap = if connected {
                 format!("{}|{}|{}|{:.1}|{}|{}",
                     s.status, s.current_text, s.last_sentence, s.volume, s.model, s.visible)
-            } else {
-                String::new()
-            };
+            } else { String::new() };
         }
 
-        // Render on state change
+        // Render to INACTIVE (hidden) overlay, then swap visibility
         if connected && snap != last_snapshot {
             last_snapshot = snap;
             let s = state.lock().unwrap();
-            if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
+            if let Err(e) = renderer.render_frame(&mut overlay, inactive, &s) {
                 tracing::warn!("Render: {}", e);
             }
+            // Atomic flip: show new, hide old
+            let _ = overlay.set_visibility(inactive, true);
+            let _ = overlay.set_visibility(active, false);
+            std::mem::swap(&mut active, &mut inactive);
         } else if !connected {
-            let _ = renderer.render_disconnected(&mut overlay, handle);
+            let _ = renderer.render_disconnected(&mut overlay, active);
         }
 
-        // Update transform AFTER render (so texture is ready before moving)
+        // Update transform on both overlays
         {
             let s = state.lock().unwrap();
-            update_transform(&system, &mut overlay, handle, &mut smoothed, &s);
+            update_transform(&system, &mut overlay, &[ha, hb], &mut smoothed, &s);
         }
 
         std::thread::sleep(Duration::from_millis(10));
     }
 }
 
-/// Connect to main process, perform handshake.
-/// Returns (client, is_connected).
 fn connect_to_server() -> (Option<ipc::IpcClient>, bool) {
     match ipc::IpcClient::connect("\\\\.\\pipe\\vrc-chat-hud") {
-        Ok(client) => {
-            // Wait for hello (blocking ReadFile on first connect)
-            // The server sends hello immediately after connect.
-            // We send ack and return connected.
-            client.send_ack();
-            tracing::info!("IPC connected, handshake complete");
-            (Some(client), true)
-        }
-        Err(e) => {
-            tracing::warn!("IPC connect failed: {}", e);
-            (None, false)
-        }
+        Ok(c) => { c.send_ack(); (Some(c), true) }
+        Err(e) => { tracing::warn!("IPC: {}", e); (None, false) }
     }
 }
 
 fn get_hmd_pose(system: &openvr::System) -> Option<[[f32; 4]; 3]> {
-    let poses = system.device_to_absolute_tracking_pose(
-        TrackingUniverseOrigin::Standing, 0.0,
-    );
+    let poses = system.device_to_absolute_tracking_pose(TrackingUniverseOrigin::Standing, 0.0);
     let pose = &poses[tracked_device_index::HMD.0 as usize];
     if pose.device_is_connected() && pose.pose_is_valid() {
         Some(*pose.device_to_absolute_tracking())
-    } else {
-        None
-    }
+    } else { None }
 }
 
 fn update_transform(
     system: &openvr::System,
     overlay: &mut openvr::Overlay,
-    handle: openvr::overlay::OverlayHandle,
+    handles: &[OverlayHandle],
     smoothed: &mut [[f32; 4]; 3],
     config: &OverlayState,
 ) {
     if let Some(current) = get_hmd_pose(system) {
-        let alpha = config.smoothing;
-        for i in 0..3 {
-            for j in 0..4 {
-                smoothed[i][j] = smoothed[i][j] * (1.0 - alpha) + current[i][j] * alpha;
-            }
-        }
+        let a = config.smoothing;
+        for i in 0..3 { for j in 0..4 { smoothed[i][j] = smoothed[i][j] * (1.0 - a) + current[i][j] * a; } }
     }
-
-    let ox = smoothed[0][3]
-        + smoothed[0][0] * config.pos_x + smoothed[0][1] * config.pos_y + smoothed[0][2] * config.pos_z;
-    let oy = smoothed[1][3]
-        + smoothed[1][0] * config.pos_x + smoothed[1][1] * config.pos_y + smoothed[1][2] * config.pos_z;
-    let oz = smoothed[2][3]
-        + smoothed[2][0] * config.pos_x + smoothed[2][1] * config.pos_y + smoothed[2][2] * config.pos_z;
-
+    let ox = smoothed[0][3] + smoothed[0][0]*config.pos_x + smoothed[0][1]*config.pos_y + smoothed[0][2]*config.pos_z;
+    let oy = smoothed[1][3] + smoothed[1][0]*config.pos_x + smoothed[1][1]*config.pos_y + smoothed[1][2]*config.pos_z;
+    let oz = smoothed[2][3] + smoothed[2][0]*config.pos_x + smoothed[2][1]*config.pos_y + smoothed[2][2]*config.pos_z;
     let abs = Matrix3x4([
         [smoothed[0][0], smoothed[0][1], smoothed[0][2], ox],
         [smoothed[1][0], smoothed[1][1], smoothed[1][2], oy],
         [smoothed[2][0], smoothed[2][1], smoothed[2][2], oz],
     ]);
-
-    if let Err(e) = overlay.set_transform_absolute(handle, TrackingUniverseOrigin::Standing, &abs) {
-        tracing::warn!("set_transform_absolute: {:?}", e);
+    for &h in handles {
+        if let Err(e) = overlay.set_transform_absolute(h, TrackingUniverseOrigin::Standing, &abs) {
+            tracing::warn!("transform: {:?}", e);
+        }
     }
 }
