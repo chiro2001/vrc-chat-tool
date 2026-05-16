@@ -69,10 +69,10 @@ pub(crate) fn start_recording_inner(
             cfg.asr_provider, cfg.asr_backend, streaming, model_name
         ));
 
-        // Update overlay IPC status
+        // Update overlay IPC — initially idle (waiting for speech)
         *vrc_chat_tool::ipc_server::OVERLAY_MSG.lock().unwrap() = vrc_chat_tool::ipc_server::OverlayMessage {
             msg_type: "data".into(),
-            status: Some("recording".into()),
+            status: Some("idle".into()),
             text: None,
             sentence: None,
             volume: Some(0.0),
@@ -158,9 +158,18 @@ pub(crate) fn start_recording_inner(
                         let volume = ((rms / 32768.0).min(1.0)) as f32;
                         let _ = app_for_volume.emit_all("volume-update", volume);
 
-                        // Update overlay IPC volume
+                        // Detect speech for VAD-based status
+                        let energy = rms / 32767.0;
+                        let has_speech = energy >= 0.005;
+
+                        // Update overlay IPC volume + VAD status
                         if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
                             msg.volume = Some(volume);
+                            if has_speech {
+                                msg.status = Some("recognizing".into());
+                            } else if msg.status.as_deref() == Some("recognizing") {
+                                msg.status = Some("idle".into());
+                            }
                         }
 
                         // Track VAD-based speech duration for Tencent billing
@@ -216,6 +225,7 @@ pub(crate) fn start_recording_inner(
                             if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
                                 msg.status = Some("recognizing".into());
                                 msg.text = Some(partial_text.to_string());
+                                msg.sentence = None;
                             }
                             if let Some(ref osc) = osc_for_partial {
                                 let _ = osc.send_partial(partial_text);
@@ -244,7 +254,9 @@ pub(crate) fn start_recording_inner(
                         if clean_text.is_empty() { return; }
                         let _ = app_sentence.emit_all("recording-sentence", clean_text.clone());
                         if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
+                            msg.text = None;
                             msg.sentence = Some(clean_text.clone());
+                            msg.status = Some("idle".into());
                         }
                         if let Some(ref osc) = osc_s {
                             let _ = osc.send_chatbox(&clean_text);
@@ -291,10 +303,11 @@ pub(crate) fn start_recording_inner(
             Ok(text) => {
                 log::info("asr", &format!("Recognition result: {}", text));
                 let _ = app.emit_all("recording-complete", text);
-                // Reset overlay IPC to idle
+                // Reset overlay IPC to stop
                 if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                    msg.status = Some("idle".into());
+                    msg.status = Some("stop".into());
                     msg.text = None;
+                    msg.sentence = None;
                     msg.volume = Some(0.0);
                 }
             }

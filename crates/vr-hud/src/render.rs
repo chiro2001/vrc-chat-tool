@@ -1,18 +1,24 @@
 //! Overlay rendering using fontdue + set_raw_data.
-//! Resolution & font sizes scale together via `scale` factor.
-//! Base: 1024×256 px, 24px font → in VR ~0.8m wide.
+//! Dynamically sizes texture based on content height.
+//!
+//! Status modes:
+//!   stop        — only status line, minimal height
+//!   idle        — status + last sentence (if any)
+//!   recognizing — status + separator + live text + last sentence (if any)
 
 use crate::state::OverlayState;
 use fontdue::Font;
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 use openvr::overlay::OverlayHandle;
 
+const BASE_W: usize = 1024;
+const MAX_H: usize = 512; // max texture height in pixels
+
 pub struct OverlayRenderer {
     font: Font,
     pixels: Vec<u8>,
     scale: f32,
     tex_w: usize,
-    tex_h: usize,
 }
 
 impl OverlayRenderer {
@@ -20,17 +26,15 @@ impl OverlayRenderer {
         let font_data = std::fs::read("C:\\Windows\\Fonts\\simhei.ttf")?;
         let font = Font::from_bytes(font_data, fontdue::FontSettings::default())
             .map_err(|e| anyhow::anyhow!("Failed to load font: {}", e))?;
-        let mut r = Self { font, pixels: Vec::new(), scale: 0.0, tex_w: 0, tex_h: 0 };
+        let mut r = Self { font, pixels: Vec::new(), scale: 0.0, tex_w: 0 };
         r.set_scale(scale);
         Ok(r)
     }
 
-    /// Change render scale — reallocates pixel buffer.
     pub fn set_scale(&mut self, scale: f32) {
         self.scale = scale;
-        self.tex_w = (1024.0 * scale) as usize;
-        self.tex_h = (256.0 * scale) as usize;
-        self.pixels = vec![0u8; self.tex_w * self.tex_h * 4];
+        self.tex_w = (BASE_W as f32 * scale) as usize;
+        self.pixels = vec![0u8; self.tex_w * MAX_H * 4];
     }
 
     /// Full HUD render (connected state).
@@ -40,65 +44,92 @@ impl OverlayRenderer {
         handle: OverlayHandle,
         state: &OverlayState,
     ) -> anyhow::Result<()> {
-        self.clear_background(false);
-
         let font_size = 48.0 * self.scale;
         let small_size = 36.0 * self.scale;
-        let mut y: f32 = 8.0 * self.scale;
+        let line_pad = 6.0 * self.scale;
+        let sep_pad = 4.0 * self.scale;
 
-        // Status indicator
+        self.clear_background(false);
+
+        let mut y: f32 = 4.0 * self.scale;
+
+        // ═══ Status line (always shown) ═══
         let status_color = match state.status.as_str() {
             "recording" => [100u8, 220, 80, 255],
             "recognizing" => [255, 180, 50, 255],
+            "stop" => [120, 120, 140, 200],
             _ => [80, 200, 80, 255],
         };
-        let status_text = format!("● {}  音量: {:.0}%  模型: {}",
-            status_label(&state.status),
-            state.volume * 100.0,
-            state.model,
-        );
+        let label = match state.status.as_str() {
+            "stop" => "● 未录音",
+            "recording" => "● 录音中",
+            "recognizing" => "● 识别中",
+            _ => "● 就绪",
+        };
+        let status_text = format!("{}    音量: {:.0}%    后端: {}",
+            label, state.volume * 100.0, state.model);
         y = self.render_text(&status_text, font_size, 12.0 * self.scale, y, status_color);
-        y += 12.0 * self.scale;
 
-        // Separator
+        // If stop — nothing else to render
+        if state.status == "stop" {
+            let content_h = (y + 4.0 * self.scale) as usize;
+            return self.upload(overlay, handle, content_h);
+        }
+
+        y += sep_pad;
         self.draw_separator(y as usize);
-        y += 8.0 * self.scale;
+        y += sep_pad;
 
-        // Current recognition text
+        // ═══ Main content area ═══
         if !state.current_text.is_empty() {
+            // Live recognition text
             y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [220, 220, 220, 255]);
-            y += 6.0 * self.scale;
+        } else if !state.last_sentence.is_empty() {
+            // Sentence shown as main text when no live text
+            y = self.render_text(&state.last_sentence, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
         }
 
-        // Last sentence
-        if !state.last_sentence.is_empty() {
-            let _ = self.render_text(&format!("> {}", state.last_sentence), small_size, 12.0 * self.scale, y, [180, 200, 180, 255]);
+        // Last sentence (shown below main text in smaller font)
+        if !state.current_text.is_empty() && !state.last_sentence.is_empty() {
+            y += line_pad;
+            y = self.render_text(&state.last_sentence, small_size, 12.0 * self.scale, y, [180, 200, 180, 255]);
         }
 
-        overlay
-            .set_raw_data(handle, &self.pixels, self.tex_w, self.tex_h, 4)
-            .map_err(|e| anyhow::anyhow!("set_raw_data: {:?}", e))
+        let content_h = (y + 4.0 * self.scale) as usize;
+        self.upload(overlay, handle, content_h)
     }
 
-    /// Minimal disconnected-state render — single line, transparent background.
+    /// Minimal disconnected-state render.
     pub fn render_disconnected(
         &mut self,
         overlay: &mut openvr::Overlay,
         handle: OverlayHandle,
     ) -> anyhow::Result<()> {
         self.clear_background(true);
-
         let font_size = 40.0 * self.scale;
-        self.render_text("等待主程序连接...", font_size, 12.0 * self.scale, 4.0 * self.scale, [180, 180, 180, 200]);
+        let y = self.render_text("等待主程序连接...", font_size, 12.0 * self.scale, 4.0 * self.scale, [180, 180, 180, 200]);
+        let content_h = (y + 4.0 * self.scale) as usize;
+        self.upload(overlay, handle, content_h)
+    }
 
+    /// Upload rendered content to overlay, using only the needed height.
+    fn upload(
+        &mut self,
+        overlay: &mut openvr::Overlay,
+        handle: OverlayHandle,
+        content_h: usize,
+    ) -> anyhow::Result<()> {
+        let h = content_h.min(MAX_H).max(1);
+        let total_bytes = self.tex_w * h * 4;
+        let slice = &self.pixels[..total_bytes];
         overlay
-            .set_raw_data(handle, &self.pixels, self.tex_w, self.tex_h, 4)
+            .set_raw_data(handle, slice, self.tex_w, h, 4)
             .map_err(|e| anyhow::anyhow!("set_raw_data: {:?}", e))
     }
 
     fn clear_background(&mut self, transparent: bool) {
         let alpha = if transparent { 0 } else { 180 };
-        for i in 0..self.tex_w * self.tex_h {
+        for i in 0..self.tex_w * MAX_H {
             self.pixels[i * 4 + 0] = 20;
             self.pixels[i * 4 + 1] = 20;
             self.pixels[i * 4 + 2] = 30;
@@ -129,7 +160,7 @@ impl OverlayRenderer {
                     if alpha == 0 { continue; }
                     let px = gx + col;
                     let py = gy + row;
-                    if px >= self.tex_w || py >= self.tex_h { continue; }
+                    if px >= self.tex_w || py >= MAX_H { continue; }
                     let i = py * self.tex_w + px;
                     let a = alpha as f32 / 255.0;
                     let bg = &mut self.pixels[i * 4..i * 4 + 3];
@@ -145,7 +176,7 @@ impl OverlayRenderer {
     }
 
     fn draw_separator(&mut self, y: usize) {
-        if y >= self.tex_h { return; }
+        if y >= MAX_H { return; }
         let i = y * self.tex_w;
         for x in 0..self.tex_w {
             let p = (i + x) * 4;
@@ -154,14 +185,5 @@ impl OverlayRenderer {
             self.pixels[p + 2] = 90;
             self.pixels[p + 3] = 200;
         }
-    }
-}
-
-fn status_label(status: &str) -> &str {
-    match status {
-        "recording" => "录音中",
-        "recognizing" => "识别中",
-        "error" => "错误",
-        _ => "就绪",
     }
 }

@@ -121,6 +121,18 @@ fn main() {
         config.vr_hud.pos_y,
         config.vr_hud.pos_z,
     );
+    // Initialize overlay state to "stop" (not recording)
+    {
+        let mut msg = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock().unwrap();
+        *msg = vrc_chat_tool::ipc_server::OverlayMessage {
+            msg_type: "data".into(),
+            status: Some("stop".into()),
+            model: Some(vrc_chat_tool::i18n::provider_short(
+                &config.asr_provider, &config.language,
+            )),
+            ..Default::default()
+        };
+    }
 
     // Spawn VR HUD companion process
     let _hud_child = spawn_vr_hud();
