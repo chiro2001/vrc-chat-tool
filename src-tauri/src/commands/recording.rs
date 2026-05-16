@@ -223,7 +223,6 @@ pub(crate) fn start_recording_inner(
                         if !kb {
                             let _ = app_for_partial.emit_all("recording-partial", partial_text.to_string());
                             if let Ok(mut msg) = vrc_chat_tool::ipc_server::OVERLAY_MSG.lock() {
-                                msg.status = Some("recognizing".into());
                                 msg.text = Some(partial_text.to_string());
                                 msg.sentence = None;
                             }

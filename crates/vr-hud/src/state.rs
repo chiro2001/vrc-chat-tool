@@ -38,14 +38,15 @@ impl Default for OverlayState {
 }
 
 impl OverlayState {
-    /// Apply partial update — only overwrite fields that are Some.
+    /// Apply partial update — overwrite fields that are present, clear those that are None.
     pub fn update(&mut self, msg: &OverlayMessage) {
         if let Some(ref s) = msg.status { self.status = s.clone(); }
-        if let Some(ref t) = msg.text { self.current_text = t.clone(); }
-        if let Some(ref s) = msg.sentence { self.last_sentence = s.clone(); }
         if let Some(v) = msg.volume { self.volume = v; }
         if let Some(ref m) = msg.model { self.model = m.clone(); }
         if let Some(v) = msg.visible { self.visible = v; }
+        // Always update text/sentence — None means clear
+        self.current_text = msg.text.clone().unwrap_or_default();
+        self.last_sentence = msg.sentence.clone().unwrap_or_default();
     }
 
     /// Apply config update.

@@ -64,8 +64,8 @@ impl OverlayRenderer {
             "recognizing" => "● 识别中",
             _ => "● 就绪",
         };
-        let status_text = format!("{}    音量: {:.0}%    后端: {}",
-            label, state.volume * 100.0, state.model);
+        let status_text = format!("{}    后端: {}",
+            label, state.model);
         y = self.render_text(&status_text, font_size, 12.0 * self.scale, y, status_color);
 
         // If stop — nothing else to render
