@@ -22,13 +22,18 @@ use openvr::{tracked_device_index, TrackingUniverseOrigin};
 use openvr::pose::Matrix3x4;
 use state::OverlayState;
 
-/// Smoothing factor: 0=hard lock, 1=instant follow.
-/// Lower = more stable text, higher = more responsive.
+// ── Tunable parameters ──────────────────────────────────────────
+
+/// Smoothing factor for head-lag: 0=hard lock, 1=instant follow.
 const SMOOTHING: f32 = 0.10;
 
-/// Local offset from HMD to overlay (in HMD-local space).
-const LOCAL_X: f32 = 0.0;
-const LOCAL_Y: f32 = 0.1;
+/// Render scale: controls texture resolution and font size proportionally.
+const SCALE: f32 = 1.0;
+
+/// Local offset from HMD to overlay (HMD-local space, meters).
+/// Upper-left of FOV: left ~40cm, up ~30cm, forward ~1.5m.
+const LOCAL_X: f32 = -0.4;
+const LOCAL_Y: f32 = 0.3;
 const LOCAL_Z: f32 = -1.5;
 
 fn main() -> anyhow::Result<()> {
@@ -48,48 +53,37 @@ fn main() -> anyhow::Result<()> {
     tracing::info!("Overlay created");
 
     overlay
-        .set_width(handle, 0.8)
+        .set_width(handle, 0.6)
         .map_err(|e| anyhow::anyhow!("set_width: {:?}", e))?;
     overlay
         .set_opacity(handle, 0.85)
         .map_err(|e| anyhow::anyhow!("set_opacity: {:?}", e))?;
 
     // 3. Setup fontdue renderer
-    let mut renderer = render::OverlayRenderer::new()?;
+    let mut renderer = render::OverlayRenderer::new(SCALE)?;
 
-    // 4. Shared state with mock data
+    // 4. Shared state
     let state = Arc::new(Mutex::new(OverlayState::default()));
-    {
-        let mut s = state.lock().unwrap();
-        s.status = "idle".into();
-        s.current_text = "vrc-chat-hud 就绪".into();
-        s.model = "sherpa-onnx".into();
-        s.volume = 0.0;
-    }
 
-    // Render initial frame BEFORE showing
-    {
-        let s = state.lock().unwrap();
-        renderer.render_frame(&mut overlay, handle, &s)?;
-    }
-
-    // Show overlay
+    // Render disconnected state initially
+    renderer.render_disconnected(&mut overlay, handle)?;
     overlay
         .set_visibility(handle, true)
         .map_err(|e| anyhow::anyhow!("show_overlay: {:?}", e))?;
-    tracing::info!("Overlay visible");
+    tracing::info!("Overlay visible (disconnected)");
 
-    // Initialize smoothed HMD pose from first reading
-    let mut smoothed: [[f32; 4]; 3] = get_hmd_pose(&system);
-    tracing::info!("Initial HMD pose captured");
+    // Initialize smoothed HMD pose
+    let mut smoothed = get_hmd_pose(&system);
 
-    // 5. IPC client (optional)
+    // 5. IPC client — connect in background
     let mut ipc = ipc::IpcClient::connect("\\\\.\\pipe\\vrc-chat-hud")
         .map_err(|e| {
-            tracing::warn!("IPC not available ({}), using mock state", e);
+            tracing::warn!("IPC not available ({}), showing waiting state", e);
             e
         })
         .ok();
+
+    let mut connected = ipc.is_some();
 
     // 6. Event loop
     let mut last_state_snapshot = String::new();
@@ -110,18 +104,32 @@ fn main() -> anyhow::Result<()> {
         // Smooth HMD pose and update overlay transform
         update_transform(&system, &mut overlay, handle, &mut smoothed);
 
-        // Re-render only when state changes
-        let current_snapshot = {
-            let s = state.lock().unwrap();
-            format!("{}|{}|{}|{:.2}|{}",
-                s.status, s.current_text, s.last_sentence, s.volume, s.model)
-        };
+        // Render based on connection state
+        if connected {
+            let current_snapshot = {
+                let s = state.lock().unwrap();
+                format!("{}|{}|{}|{:.2}|{}",
+                    s.status, s.current_text, s.last_sentence, s.volume, s.model)
+            };
 
-        if current_snapshot != last_state_snapshot {
-            last_state_snapshot = current_snapshot;
-            if let Ok(s) = state.lock() {
-                if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
-                    tracing::warn!("Render skipped: {}", e);
+            if current_snapshot != last_state_snapshot {
+                last_state_snapshot = current_snapshot;
+                if let Ok(s) = state.lock() {
+                    if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
+                        tracing::warn!("Render skipped: {}", e);
+                    }
+                }
+            }
+        } else {
+            // Not connected yet — retry connection
+            match ipc::IpcClient::connect("\\\\.\\pipe\\vrc-chat-hud") {
+                Ok(c) => {
+                    tracing::info!("IPC connected, switching to live HUD");
+                    ipc = Some(c);
+                    connected = true;
+                }
+                Err(_) => {
+                    let _ = renderer.render_disconnected(&mut overlay, handle);
                 }
             }
         }
