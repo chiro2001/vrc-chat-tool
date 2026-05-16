@@ -78,14 +78,14 @@ impl OverlayRenderer {
         self.draw_separator(y as usize);
         y += sep_pad;
 
-        // ═══ Main content — single line ═══
-        if !state.current_text.is_empty() {
-            // Live recognition — white
-            y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
-        } else if !state.last_sentence.is_empty() {
-            // Finalized sentence — colored with ">" prefix
+        // ═══ Main content — single line, sentence has priority ═══
+        if !state.last_sentence.is_empty() {
+            // Finalized sentence (OSC result) — colored with ">" prefix
             let colored = format!("> {}", state.last_sentence);
             y = self.render_text(&colored, font_size, 12.0 * self.scale, y, [120, 220, 120, 255]);
+        } else if !state.current_text.is_empty() {
+            // Live recognition — white text while waiting for sentence
+            y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
         }
 
         let content_h = (y + 4.0 * self.scale) as usize;

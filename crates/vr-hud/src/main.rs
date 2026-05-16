@@ -156,7 +156,7 @@ fn main() -> anyhow::Result<()> {
                 let _ = overlay.set_visibility(handle, s.visible);
             }
             snap = if connected {
-                format!("{}|{}|{}|{:.2}|{}|{}",
+                format!("{}|{}|{}|{:.1}|{}|{}",
                     s.status, s.current_text, s.last_sentence, s.volume, s.model, s.visible)
             } else {
                 String::new()
