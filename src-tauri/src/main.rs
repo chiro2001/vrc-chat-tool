@@ -1,7 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
+use std::process::{Child, Command};
 use tauri::Manager;
 use vrc_chat_tool::config;
 use vrc_chat_tool::trigger;
@@ -35,6 +36,39 @@ fn save_device_index(device_idx: u32) {
     history::set_audio_device_index(device_idx as usize);
 }
 
+// --- Helpers ---
+
+static HUD_CHILD: Mutex<Option<Child>> = Mutex::new(None);
+
+fn spawn_vr_hud() {
+    let exe_dir = match std::env::current_exe() {
+        Ok(p) => p.parent().map(|p| p.to_path_buf()),
+        Err(_) => None,
+    };
+    if let Some(dir) = exe_dir {
+        let hud = dir.join("vrc-chat-hud.exe");
+        if hud.exists() {
+            log::info("main", &format!("Spawning VR HUD: {}", hud.display()));
+            match Command::new(&hud).spawn() {
+                Ok(child) => {
+                    *HUD_CHILD.lock().unwrap() = Some(child);
+                }
+                Err(e) => log::warn("main", &format!("Failed to spawn HUD: {}", e)),
+            }
+        } else {
+            log::warn("main", &format!("HUD binary not found: {}", hud.display()));
+        }
+    }
+}
+
+fn kill_vr_hud() {
+    if let Some(mut child) = HUD_CHILD.lock().unwrap().take() {
+        log::info("main", "Shutting down VR HUD");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 // --- Main Entry ---
 fn main() {
     log::init("tmp/app.log");
@@ -64,6 +98,12 @@ fn main() {
     } else {
         log::info("main", "No STT provider configured, trigger listener disabled");
     }
+
+    // Start overlay IPC server (for VR HUD)
+    vrc_chat_tool::ipc_server::start_overlay_ipc();
+
+    // Spawn VR HUD companion process
+    let _hud_child = spawn_vr_hud();
 
     tauri::Builder::default()
         .setup(|app| {
@@ -209,8 +249,8 @@ fn main() {
             commands::overlay::is_overlay_visible,
         ])
         .on_window_event(|event| {
-            // Close overlay when main window is destroyed
             if let tauri::WindowEvent::Destroyed = event.event() {
+                kill_vr_hud();
                 if let Some(overlay) = event.window().app_handle().get_window("overlay") {
                     let _ = overlay.close();
                 }
