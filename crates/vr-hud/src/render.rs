@@ -1,113 +1,136 @@
-//! D3D11 + imgui overlay rendering.
-//! Creates a D3D11 texture, renders imgui frame into it,
-//! and submits to the OpenVR overlay via SetOverlayTexture.
+//! Overlay rendering using fontdue + set_raw_data.
+//! Resolution & font sizes scale together via SCALE factor.
+//! Base: 1024×256 px, 24px font → in VR ~0.8m wide.
+
+const SCALE: f32 = 1.0;
+const TEX_W: usize = (1024.0 * SCALE) as usize;
+const TEX_H: usize = (256.0 * SCALE) as usize;
+const FONT_SIZE: f32 = 24.0 * SCALE;
+const SMALL_SIZE: f32 = 18.0 * SCALE;
 
 use crate::state::OverlayState;
+use fontdue::Font;
+use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
+use openvr::overlay::OverlayHandle;
 
 pub struct OverlayRenderer {
-    device: windows::Win32::Graphics::Direct3D11::ID3D11Device,
-    context: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
-    texture: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
-    shader_resource_view: windows::Win32::Graphics::Direct3D11::ID3D11ShaderResourceView,
-    imgui: imgui::Context,
-    platform: imgui_winit_support::WinitPlatform,
-    render_target: Option<(u32, u32)>,
+    font: Font,
+    pixels: Vec<u8>,
 }
 
 impl OverlayRenderer {
-    /// Initialize D3D11 device and imgui context using the GPU that SteamVR uses.
     pub fn new() -> anyhow::Result<Self> {
-        // Create D3D11 device
-        let (device, context) = create_d3d11_device()?;
-
-        // Create render target texture (1024x256 pixels → ~1.2m wide)
-        let width: u32 = 1024;
-        let height: u32 = 256;
-        let (texture, shader_resource_view) =
-            create_overlay_texture(&device, width, height)?;
-
-        // Init imgui
-        let mut imgui = imgui::Context::create();
-        imgui.set_ini_filename(None);
-        imgui.fonts().add_font(&[imgui::FontSource::DefaultFontData { config: None }]);
-
-        let style = imgui.style_mut();
-        style.alpha = 0.85;
-        style.colors[imgui::style::Color::WindowBg as usize] = [0.0, 0.0, 0.0, 0.6];
-        style.colors[imgui::style::Color::Text as usize] = [0.88, 0.88, 0.88, 1.0];
-
-        let platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
-
-        Ok(Self {
-            device,
-            context,
-            texture,
-            shader_resource_view,
-            imgui,
-            platform,
-            render_target: Some((width, height)),
-        })
+        let font_data = std::fs::read("C:\\Windows\\Fonts\\simhei.ttf")?;
+        let font = Font::from_bytes(font_data, fontdue::FontSettings::default())
+            .map_err(|e| anyhow::anyhow!("Failed to load font: {}", e))?;
+        let pixels = vec![0u8; TEX_W * TEX_H * 4];
+        Ok(Self { font, pixels })
     }
 
-    /// Render one frame of imgui into the overlay texture and submit to OpenVR.
+    /// Render one frame of the overlay and submit to OpenVR.
     pub fn render_frame(
-        &self,
-        handle: openvr::sys::VROverlayHandle_t,
-        overlay: &openvr::overlay::Overlay<openvr::overlay::Handle>,
+        &mut self,
+        overlay: &mut openvr::Overlay,
+        handle: OverlayHandle,
         state: &OverlayState,
     ) -> anyhow::Result<()> {
-        let ui = self.imgui.frame();
+        // Clear background
+        self.clear_background();
 
-        // Build UI
-        imgui::Window::new("##hud")
-            .position([10.0, 10.0], imgui::Condition::Always)
-            .size([1000.0, 240.0], imgui::Condition::Always)
-            .no_title_bar(true)
-            .no_resize(true)
-            .no_move(true)
-            .no_scrollbar(true)
-            .draw_background(true)
-            .build(&ui, || {
-                // Status indicator
-                let status_color = match state.status.as_str() {
-                    "recording" => [0.9, 0.2, 0.2, 1.0],
-                    "recognizing" => [1.0, 0.7, 0.2, 1.0],
-                    _ => [0.3, 0.8, 0.3, 1.0],
-                };
-                ui.text_colored(status_color, format!("● {}", status_label(&state.status)));
+        let mut y: f32 = 8.0;
 
-                ui.same_line_with_pos(200.0);
-                ui.text(format!("音量: {:.0}%", state.volume * 100.0));
+        // Status indicator
+        let status_color = match state.status.as_str() {
+            "recording" => [100u8, 220, 80, 255],
+            "recognizing" => [255, 180, 50, 255],
+            _ => [80, 200, 80, 255],
+        };
+        let status_text = format!("● {}  音量: {:.0}%  模型: {}",
+            status_label(&state.status),
+            state.volume * 100.0,
+            state.model,
+        );
+        y = self.render_text(&status_text, FONT_SIZE, 12.0, y, status_color);
+        y += 12.0;
 
-                ui.same_line_with_pos(400.0);
-                ui.text(format!("模型: {}", state.model));
+        // Separator
+        self.draw_separator(y as usize);
+        y += 8.0;
 
-                ui.separator();
+        // Current recognition text
+        if !state.current_text.is_empty() {
+            y = self.render_text(&state.current_text, FONT_SIZE, 12.0, y, [220, 220, 220, 255]);
+            y += 6.0;
+        }
 
-                // Recognition text
-                if !state.current_text.is_empty() {
-                    ui.text_wrapped(&state.current_text);
+        // Last sentence
+        if !state.last_sentence.is_empty() {
+            let _ = self.render_text(&format!("> {}", state.last_sentence), SMALL_SIZE, 12.0, y, [180, 200, 180, 255]);
+        }
+
+        // Upload to overlay
+        overlay
+            .set_raw_data(handle, &self.pixels, TEX_W, TEX_H, 4)
+            .map_err(|e| anyhow::anyhow!("set_raw_data: {:?}", e))
+    }
+
+    fn clear_background(&mut self) {
+        for i in 0..TEX_W * TEX_H {
+            self.pixels[i * 4 + 0] = 20;
+            self.pixels[i * 4 + 1] = 20;
+            self.pixels[i * 4 + 2] = 30;
+            self.pixels[i * 4 + 3] = 180;
+        }
+    }
+
+    fn render_text(&mut self, text: &str, size: f32, x: f32, y: f32, color: [u8; 4]) -> f32 {
+        let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
+        layout.reset(&LayoutSettings {
+            x,
+            y,
+            max_width: Some(TEX_W as f32 - x - 8.0),
+            ..LayoutSettings::default()
+        });
+        layout.append(&[&self.font], &TextStyle::new(text, size, 0));
+
+        for glyph in layout.glyphs() {
+            let (_, bitmap) = self.font.rasterize(glyph.parent, size);
+            let gx = glyph.x as usize;
+            let gy = glyph.y as usize;
+            let gw = glyph.width as usize;
+            let gh = glyph.height as usize;
+
+            for row in 0..gh {
+                for col in 0..gw {
+                    let alpha = bitmap[row * gw + col];
+                    if alpha == 0 { continue; }
+                    let px = gx + col;
+                    let py = gy + row;
+                    if px >= TEX_W || py >= TEX_H { continue; }
+                    let i = py * TEX_W + px;
+                    let a = alpha as f32 / 255.0;
+                    let bg = &mut self.pixels[i * 4..i * 4 + 3];
+                    bg[0] = (bg[0] as f32 * (1.0 - a) + color[0] as f32 * a) as u8;
+                    bg[1] = (bg[1] as f32 * (1.0 - a) + color[1] as f32 * a) as u8;
+                    bg[2] = (bg[2] as f32 * (1.0 - a) + color[2] as f32 * a) as u8;
+                    self.pixels[i * 4 + 3] = 255;
                 }
+            }
+        }
 
-                // Last sentence
-                if !state.last_sentence.is_empty() {
-                    ui.separator();
-                    ui.text_wrapped(&state.last_sentence);
-                }
-            });
+        y + layout.height() as f32
+    }
 
-        // Render to texture via the renderer
-        // (In full implementation: create render target view, render imgui draw data,
-        //  submit texture handle to OpenVR)
-        let _ = ui;
-        let _ = handle;
-        let _ = overlay;
-
-        // Placeholder: submit texture to overlay
-        // let tex_handle: *mut std::ffi::c_void = &self.texture as *const _ as *mut _;
-        // overlay.set_overlay_texture(handle, tex_handle)?;
-
-        Ok(())
+    fn draw_separator(&mut self, y: usize) {
+        if y >= TEX_H { return; }
+        let i = y * TEX_W;
+        for x in 0..TEX_W {
+            let p = (i + x) * 4;
+            self.pixels[p + 0] = 80;
+            self.pixels[p + 1] = 80;
+            self.pixels[p + 2] = 90;
+            self.pixels[p + 3] = 200;
+        }
     }
 }
 
@@ -118,71 +141,4 @@ fn status_label(status: &str) -> &str {
         "error" => "错误",
         _ => "就绪",
     }
-}
-
-fn create_d3d11_device() -> anyhow::Result<(
-    windows::Win32::Graphics::Direct3D11::ID3D11Device,
-    windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
-)> {
-    use windows::Win32::Graphics::Direct3D11::*;
-    use windows::Win32::Graphics::Direct3D::*;
-    use windows::Win32::Graphics::Dxgi::Common::*;
-
-    let mut device: Option<ID3D11Device> = None;
-    let mut context: Option<ID3D11DeviceContext> = None;
-
-    unsafe {
-        D3D11CreateDevice(
-            None, // default adapter
-            D3D_DRIVER_TYPE_HARDWARE,
-            None, // no software rasterizer
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            None, // default feature level
-            D3D11_SDK_VERSION,
-            Some(&mut device),
-            None, // feature level
-            Some(&mut context),
-        )?;
-    }
-
-    Ok((device.unwrap(), context.unwrap()))
-}
-
-fn create_overlay_texture(
-    device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
-    width: u32,
-    height: u32,
-) -> anyhow::Result<(
-    windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
-    windows::Win32::Graphics::Direct3D11::ID3D11ShaderResourceView,
-)> {
-    use windows::Win32::Graphics::Direct3D11::*;
-    use windows::Win32::Graphics::Dxgi::Common::*;
-
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width,
-        Height: height,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
-        CPUAccessFlags: 0,
-        MiscFlags: 0,
-    };
-
-    let texture = unsafe {
-        let mut tex: Option<ID3D11Texture2D> = None;
-        device.CreateTexture2D(&desc, None, Some(&mut tex))?;
-        tex.unwrap()
-    };
-
-    let srv = unsafe {
-        let mut view: Option<ID3D11ShaderResourceView> = None;
-        device.CreateShaderResourceView(&texture, None, Some(&mut view))?;
-        view.unwrap()
-    };
-
-    Ok((texture, srv))
 }

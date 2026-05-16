@@ -1,12 +1,10 @@
 //! Named pipe IPC client for receiving overlay data from the main process.
 
 use serde::{Deserialize, Serialize};
-use std::io::Read;
-use std::time::Duration;
 use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::namedpipeapi::SetNamedPipeHandleState;
-use winapi::um::winbase::{PIPE_READMODE_MESSAGE, PIPE_NOWAIT, FILE_FLAG_OVERLAPPED};
+use winapi::um::winbase::{PIPE_READMODE_MESSAGE, PIPE_NOWAIT, FILE_FLAG_OVERLAPPED, WaitNamedPipeA};
 use winapi::shared::winerror::ERROR_PIPE_BUSY;
 use winapi::ctypes::c_void;
 
@@ -61,20 +59,14 @@ impl IpcClient {
             }
 
             // Wait and retry
-            if unsafe {
-                winapi::um::namedpipeapi::WaitNamedPipeA(
-                    name.as_ptr(),
-                    5000, // 5s timeout
-                )
-            } == 0
-            {
+            if unsafe { WaitNamedPipeA(name.as_ptr(), 5000) } == 0 {
                 anyhow::bail!("Pipe server not available after timeout");
             }
         }
     }
 
     /// Poll for new messages. Calls `on_message` for each complete JSON message received.
-    pub fn poll<F: FnMut(OverlayMessage)>(&self, mut on_message: F) {
+    pub fn poll<F: FnMut(OverlayMessage)>(&mut self, mut on_message: F) {
         let mut bytes_read: u32 = 0;
         let result = unsafe {
             winapi::um::fileapi::ReadFile(
