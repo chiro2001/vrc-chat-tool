@@ -12,7 +12,7 @@ use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 use openvr::overlay::OverlayHandle;
 
 const BASE_W: usize = 1024;
-const MAX_H: usize = 256; // max texture height in pixels
+const MAX_H: usize = 128; // max texture height in pixels
 
 pub struct OverlayRenderer {
     font: Font,
