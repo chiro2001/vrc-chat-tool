@@ -45,8 +45,6 @@ impl OverlayRenderer {
         state: &OverlayState,
     ) -> anyhow::Result<()> {
         let font_size = 48.0 * self.scale;
-        let small_size = 36.0 * self.scale;
-        let line_pad = 6.0 * self.scale;
         let sep_pad = 4.0 * self.scale;
 
         self.clear_background(false);
@@ -80,19 +78,14 @@ impl OverlayRenderer {
         self.draw_separator(y as usize);
         y += sep_pad;
 
-        // ═══ Main content area ═══
+        // ═══ Main content — single line ═══
         if !state.current_text.is_empty() {
-            // Live recognition text
-            y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [220, 220, 220, 255]);
+            // Live recognition — white
+            y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
         } else if !state.last_sentence.is_empty() {
-            // Sentence shown as main text when no live text
-            y = self.render_text(&state.last_sentence, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
-        }
-
-        // Last sentence (shown below main text in smaller font)
-        if !state.current_text.is_empty() && !state.last_sentence.is_empty() {
-            y += line_pad;
-            y = self.render_text(&state.last_sentence, small_size, 12.0 * self.scale, y, [180, 200, 180, 255]);
+            // Finalized sentence — colored with ">" prefix
+            let colored = format!("> {}", state.last_sentence);
+            y = self.render_text(&colored, font_size, 12.0 * self.scale, y, [120, 220, 120, 255]);
         }
 
         let content_h = (y + 4.0 * self.scale) as usize;
