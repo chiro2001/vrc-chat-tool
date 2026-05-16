@@ -84,16 +84,18 @@ fn main() -> anyhow::Result<()> {
     let mut reconnect_backoff_ms: u64 = 1000;
     let mut was_connected = false;
     let mut last_visible = true;
+    let mut skip_transform = false;
 
     loop {
         // Poll OpenVR events
         while let Some(_event) = system.poll_next_event() {}
 
-        // Smooth HMD and update transform (uses current config from state)
-        {
+        // Smooth HMD (skip on render frames to avoid API conflict)
+        if !skip_transform {
             let s = state.lock().unwrap();
             update_transform(&system, &mut overlay, handle, &mut smoothed, &s);
         }
+        skip_transform = false;
 
         if connected {
             if let Some(ref mut c) = ipc {
@@ -166,6 +168,7 @@ fn main() -> anyhow::Result<()> {
         // Render on state change
         if connected && snap != last_snapshot {
             last_snapshot = snap;
+            skip_transform = true;
             let s = state.lock().unwrap();
             if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
                 tracing::warn!("Render: {}", e);
