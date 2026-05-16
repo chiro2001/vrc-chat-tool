@@ -84,6 +84,7 @@ fn main() -> anyhow::Result<()> {
     let mut reconnect_backoff_ms: u64 = 1000;
     let mut was_connected = false;
     let mut last_visible = true;
+    let mut rendered_this_frame = false;
 
     loop {
         // Poll OpenVR events
@@ -161,6 +162,7 @@ fn main() -> anyhow::Result<()> {
         // Render on state change
         if connected && snap != last_snapshot {
             last_snapshot = snap;
+            rendered_this_frame = true;
             let s = state.lock().unwrap();
             if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
                 tracing::warn!("Render: {}", e);
@@ -169,11 +171,12 @@ fn main() -> anyhow::Result<()> {
             let _ = renderer.render_disconnected(&mut overlay, handle);
         }
 
-        // Update transform AFTER render (so texture is ready before moving)
-        {
+        // Update transform AFTER render, but skip if we just rendered
+        if !rendered_this_frame {
             let s = state.lock().unwrap();
             update_transform(&system, &mut overlay, handle, &mut smoothed, &s);
         }
+        rendered_this_frame = false;
 
         std::thread::sleep(Duration::from_millis(10));
     }
