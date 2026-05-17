@@ -77,10 +77,10 @@ fn create_d3d11_device() -> anyhow::Result<(ID3D11Device, ID3D11DeviceContext)> 
 fn create_dynamic_texture(device: &ID3D11Device, w: u32, h: u32) -> anyhow::Result<ID3D11Texture2D> {
     let desc = D3D11_TEXTURE2D_DESC {
         Width: w, Height: h, MipLevels: 1, ArraySize: 1,
-        Format: Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+        Format: Common::DXGI_FORMAT_R8G8B8A8_UNORM,
         SampleDesc: Common::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
         Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
         CPUAccessFlags: 0,
         MiscFlags: 0,
     };
@@ -222,7 +222,7 @@ impl OverlayRenderer {
         let my = (y + h).min(MAX_H); let mx = (x + w).min(self.tex_w);
         for row in y..my {
             let s = row * self.tex_w + x; let e = (row * self.tex_w + mx).min(self.pixels.len() / 4);
-            for i in s..e { self.pixels[i*4+0]=20; self.pixels[i*4+1]=20; self.pixels[i*4+2]=30; self.pixels[i*4+3]=180; }
+            for i in s..e { self.pixels[i*4+0]=30; self.pixels[i*4+1]=20; self.pixels[i*4+2]=20; self.pixels[i*4+3]=180; }
         }
     }
 
@@ -263,7 +263,7 @@ impl OverlayRenderer {
         let i = y * self.tex_w;
         for x in 0..self.tex_w {
             let p = (i + x) * 4;
-            self.pixels[p+0]=80; self.pixels[p+1]=80; self.pixels[p+2]=90; self.pixels[p+3]=200;
+            self.pixels[p+0]=90; self.pixels[p+1]=80; self.pixels[p+2]=80; self.pixels[p+3]=200;
         }
     }
 
@@ -294,18 +294,11 @@ impl OverlayRenderer {
         let total_bytes = self.tex_w * MAX_H * 4;
         let slice = &self.pixels[..total_bytes];
 
-        let box_dst = D3D11_BOX {
-            left: 0, top: 0, front: 0,
-            right: self.tex_w as u32,
-            bottom: MAX_H as u32,
-            back: 1,
-        };
-
         unsafe {
             context.UpdateSubresource(
                 tex,
                 0,                                // DstSubresource
-                Some(&box_dst),                   // pDstBox (None = full texture)
+                None,                             // pDstBox (None = full texture)
                 slice.as_ptr() as *const c_void,  // pSrcData
                 row_bytes,                        // SrcRowPitch
                 0,                                // SrcDepthPitch
