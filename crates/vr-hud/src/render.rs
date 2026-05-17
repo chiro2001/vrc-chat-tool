@@ -22,7 +22,7 @@ use windows::core::Interface;
 use openvr_sys;
 
 const BASE_W: usize = 1024;
-const MAX_H: usize = 128;
+const MAX_H: usize = 256; // max tex height, supports multi-line text
 
 #[derive(Clone, Copy, PartialEq)]
 enum Backend {
@@ -74,15 +74,17 @@ fn create_d3d11_device() -> anyhow::Result<(ID3D11Device, ID3D11DeviceContext)> 
     Ok((device, context))
 }
 
-fn create_dynamic_texture(device: &ID3D11Device, w: u32, h: u32) -> anyhow::Result<ID3D11Texture2D> {
+fn create_dynamic_texture(device: &ID3D11Device, w: u32, h: u32, _shared: bool) -> anyhow::Result<ID3D11Texture2D> {
+    // Use D3D11_USAGE_DYNAMIC for initial CPU upload via Map/Unmap.
+    // This is the most reliable way to initialize texture data before passing to OpenVR.
     let desc = D3D11_TEXTURE2D_DESC {
         Width: w, Height: h, MipLevels: 1, ArraySize: 1,
         Format: Common::DXGI_FORMAT_R8G8B8A8_UNORM,
         SampleDesc: Common::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-        Usage: D3D11_USAGE_DEFAULT,
+        Usage: D3D11_USAGE_DYNAMIC,
         BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        CPUAccessFlags: 0,
-        MiscFlags: 2, // D3D11_RESOURCE_MISC_SHARED — required for cross-process sharing
+        CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
+        MiscFlags: 0,
     };
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe {
@@ -148,9 +150,9 @@ impl OverlayRenderer {
 
         if self.backend == Backend::D3D11 {
             if let Some(ref device) = self.device {
-                self.texture = create_dynamic_texture(device, self.tex_w as u32, MAX_H as u32).ok();
-                if self.texture.is_none() {
-                    tracing::warn!("D3D11 texture recreation failed at scale {scale}");
+                match create_dynamic_texture(device, self.tex_w as u32, MAX_H as u32, false) {
+                    Ok(t) => self.texture = Some(t),
+                    Err(e) => tracing::error!("D3D11 texture creation failed: {e}"),
                 }
             }
         }
@@ -203,7 +205,20 @@ impl OverlayRenderer {
             y = self.render_text(&state.current_text, font_size, 12.0 * self.scale, y, [255, 255, 255, 255]);
         }
 
-        self.present(overlay, handle, (y + 4.0 * self.scale) as usize)
+        let content_h = (y + 4.0 * self.scale) as usize;
+        if self.backend == Backend::D3D11 {
+            if let Err(e) = self.d3d11_present(handle, content_h) {
+                tracing::warn!("D3D11 present failed ({e}), switching to RawData backend");
+                self.backend = Backend::RawData;
+                self.device = None;
+                self.context = None;
+                self.texture = None;
+                self.overlay_fn_table = None;
+            } else {
+                return Ok(());
+            }
+        }
+        self.rawdata_present(overlay, handle, content_h)
     }
 
     pub fn render_disconnected(
@@ -213,7 +228,23 @@ impl OverlayRenderer {
     ) -> anyhow::Result<()> {
         self.fill_rect_transparent(0, 0, self.tex_w, MAX_H);
         let y = self.render_text("等待主程序连接...", 40.0 * self.scale, 12.0 * self.scale, 4.0 * self.scale, [180, 180, 180, 200]);
-        self.present(overlay, handle, (y + 4.0 * self.scale) as usize)
+        let content_h = (y + 4.0 * self.scale) as usize;
+
+        // Try D3D11 first; if it fails (e.g. error 20 on wrong GPU), fall back to RawData.
+        if self.backend == Backend::D3D11 {
+            match self.d3d11_present(handle, content_h) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!("D3D11 present failed ({e}), switching to RawData backend");
+                    self.backend = Backend::RawData;
+                    self.device = None;
+                    self.context = None;
+                    self.texture = None;
+                    self.overlay_fn_table = None;
+                }
+            }
+        }
+        self.rawdata_present(overlay, handle, content_h)
     }
 
     // ── CPU rasterization helpers ──
@@ -289,20 +320,27 @@ impl OverlayRenderer {
         let table = self.overlay_fn_table
             .ok_or_else(|| anyhow::anyhow!("overlay fn table not initialized"))?;
 
-        // Upload all rows via UpdateSubresource (no Map needed for DEFAULT usage)
-        let row_bytes = (self.tex_w * 4) as u32;
+        // Upload via Map/Unmap (DYNAMIC texture with CPU write access)
         let total_bytes = self.tex_w * MAX_H * 4;
         let slice = &self.pixels[..total_bytes];
 
         unsafe {
-            context.UpdateSubresource(
-                tex,
-                0,                                // DstSubresource
-                None,                             // pDstBox (None = full texture)
-                slice.as_ptr() as *const c_void,  // pSrcData
-                row_bytes,                        // SrcRowPitch
-                0,                                // SrcDepthPitch
-            );
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            context.Map(tex, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut mapped))
+                .map_err(|e| anyhow::anyhow!("D3D11 Map: {e}"))?;
+
+            let src_row = self.tex_w * 4;
+            let dst_row = mapped.RowPitch as usize;
+            let dst = mapped.pData as *mut u8;
+            for row in 0..MAX_H {
+                std::ptr::copy_nonoverlapping(
+                    slice.as_ptr().add(row * src_row),
+                    dst.add(row * dst_row),
+                    src_row,
+                );
+            }
+
+            context.Unmap(tex, 0);
         }
 
         let mut vr_tex = openvr_sys::Texture_t {
