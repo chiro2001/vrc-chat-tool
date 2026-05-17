@@ -8,7 +8,8 @@ name = "vrc-chat-hud"
 path = "src/main.rs"
 
 [dependencies]
-openvr = "0.9"
+openvr = { version = "0.9", features = ["submit_d3d11"] }
+openvr_sys = "2.1"
 fontdue = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,6 +17,12 @@ anyhow = "1"
 ctrlc = "3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+windows = { version = "0.62", features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Foundation",
+] }
 
 # IPC: named pipe client
 winapi = { version = "0.3", features = ["winbase", "fileapi", "namedpipeapi", "handleapi", "minwinbase", "memoryapi", "winerror", "errhandlingapi"] }
