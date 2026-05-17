@@ -77,7 +77,7 @@ fn create_d3d11_device() -> anyhow::Result<(ID3D11Device, ID3D11DeviceContext)> 
 fn create_dynamic_texture(device: &ID3D11Device, w: u32, h: u32) -> anyhow::Result<ID3D11Texture2D> {
     let desc = D3D11_TEXTURE2D_DESC {
         Width: w, Height: h, MipLevels: 1, ArraySize: 1,
-        Format: Common::DXGI_FORMAT_R8G8B8A8_UNORM,
+        Format: Common::DXGI_FORMAT_B8G8R8A8_UNORM,
         SampleDesc: Common::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
         Usage: D3D11_USAGE_DYNAMIC,
         BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
@@ -281,8 +281,7 @@ impl OverlayRenderer {
         }
     }
 
-    fn d3d11_present(&self, handle: OverlayHandle, content_h: usize) -> anyhow::Result<()> {
-        let h = content_h.clamp(64, MAX_H);
+    fn d3d11_present(&self, handle: OverlayHandle, _content_h: usize) -> anyhow::Result<()> {
         let tex = self.texture.as_ref()
             .ok_or_else(|| anyhow::anyhow!("D3D11 texture not initialized"))?;
         let context = self.context.as_ref()
@@ -290,7 +289,8 @@ impl OverlayRenderer {
         let table = self.overlay_fn_table
             .ok_or_else(|| anyhow::anyhow!("overlay fn table not initialized"))?;
 
-        let total_bytes = self.tex_w * h * 4;
+        // Upload ALL rows to avoid garbage from MAP_WRITE_DISCARD
+        let total_bytes = self.tex_w * MAX_H * 4;
         let slice = &self.pixels[..total_bytes];
 
         unsafe {
@@ -301,7 +301,7 @@ impl OverlayRenderer {
             let src_row = self.tex_w * 4;
             let dst_row = mapped.RowPitch as usize;
             let dst = mapped.pData as *mut u8;
-            for row in 0..h {
+            for row in 0..MAX_H {
                 std::ptr::copy_nonoverlapping(
                     slice.as_ptr().add(row * src_row),
                     dst.add(row * dst_row), src_row);
