@@ -16,9 +16,6 @@ use state::OverlayState;
 
 const SMOOTHING: f32 = 0.10;
 const SCALE: f32 = 1.0;
-const POS_X: f32 = -0.4;
-const POS_Y: f32 = 0.3;
-const POS_Z: f32 = -1.5;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -36,28 +33,22 @@ fn main() -> anyhow::Result<()> {
     let system = ctx.system()?;
     let mut overlay = ctx.overlay()?;
 
-    // Create two overlays for double buffering
+    // Create single overlay
     let pid = std::process::id();
-    let ha = overlay.create_overlay(&format!("vrcchat.hud.{}.a", pid), "VRC Chat HUD")
-        .map_err(|e| anyhow::anyhow!("create_overlay A: {:?}", e))?;
-    let hb = overlay.create_overlay(&format!("vrcchat.hud.{}.b", pid), "VRC Chat HUD B")
-        .map_err(|e| anyhow::anyhow!("create_overlay B: {:?}", e))?;
-
-    for &h in &[ha, hb] {
-        overlay.set_width(h, 0.6).map_err(|e| anyhow::anyhow!("set_width: {:?}", e))?;
-        overlay.set_opacity(h, 0.85).map_err(|e| anyhow::anyhow!("set_opacity: {:?}", e))?;
-    }
+    let key = format!("vrcchat.hud.{}", pid);
+    let handle = overlay
+        .create_overlay(&key, "VRC Chat HUD")
+        .map_err(|e| anyhow::anyhow!("create_overlay: {:?}", e))?;
+    overlay.set_width(handle, 0.6).map_err(|e| anyhow::anyhow!("set_width: {:?}", e))?;
+    overlay.set_opacity(handle, 0.85).map_err(|e| anyhow::anyhow!("set_opacity: {:?}", e))?;
 
     let state = Arc::new(Mutex::new(OverlayState::default()));
     let mut renderer = render::OverlayRenderer::new(SCALE)?;
 
-    // Show A (disconnected), hide B
-    renderer.render_disconnected(&mut overlay, ha)?;
-    overlay.set_visibility(ha, true).map_err(|e| anyhow::anyhow!("show A: {:?}", e))?;
-    overlay.set_visibility(hb, false).map_err(|e| anyhow::anyhow!("hide B: {:?}", e))?;
-
-    let mut active = ha;   // currently visible
-    let mut inactive = hb; // hidden, used for rendering
+    // Show disconnected state
+    renderer.render_disconnected(&mut overlay, handle)?;
+    overlay.set_visibility(handle, true).map_err(|e| anyhow::anyhow!("show: {:?}", e))?;
+    tracing::info!("Overlay visible");
 
     // Initial HMD pose
     let mut smoothed = [[1.0f32, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
@@ -81,10 +72,8 @@ fn main() -> anyhow::Result<()> {
                             let mut s = state.lock().unwrap();
                             s.apply_config(&msg);
                             renderer.set_scale(s.scale);
-                            for &h in &[ha, hb] {
-                                overlay.set_opacity(h, s.opacity)
-                                    .map_err(|e| tracing::warn!("set_opacity: {:?}", e)).ok();
-                            }
+                            overlay.set_opacity(handle, s.opacity)
+                                .map_err(|e| tracing::warn!("set_opacity: {:?}", e)).ok();
                         }
                         ipc::HudEvent::Data(msg) => state.lock().unwrap().update(&msg),
                         _ => {}
@@ -101,7 +90,7 @@ fn main() -> anyhow::Result<()> {
 
         // Visibility transitions
         if connected && !was_connected {
-            for &h in &[ha, hb] { let _ = overlay.set_visibility(h, true); }
+            let _ = overlay.set_visibility(handle, true);
             was_connected = true;
         }
 
@@ -111,8 +100,7 @@ fn main() -> anyhow::Result<()> {
             if s.visible != last_visible {
                 last_visible = s.visible;
                 let v = s.visible && connected;
-                let _ = overlay.set_visibility(active, v);
-                if !v { let _ = overlay.set_visibility(inactive, false); }
+                let _ = overlay.set_visibility(handle, v);
             }
             snap = if connected {
                 format!("{}|{}|{}|{:.1}|{}|{}",
@@ -120,25 +108,21 @@ fn main() -> anyhow::Result<()> {
             } else { String::new() };
         }
 
-        // Render to INACTIVE (hidden) overlay, then swap visibility
+        // Render on state change
         if connected && snap != last_snapshot {
             last_snapshot = snap;
             let s = state.lock().unwrap();
-            if let Err(e) = renderer.render_frame(&mut overlay, inactive, &s) {
+            if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
                 tracing::warn!("Render: {}", e);
             }
-            // Atomic flip: show new, hide old
-            let _ = overlay.set_visibility(inactive, true);
-            let _ = overlay.set_visibility(active, false);
-            std::mem::swap(&mut active, &mut inactive);
         } else if !connected {
-            let _ = renderer.render_disconnected(&mut overlay, active);
+            let _ = renderer.render_disconnected(&mut overlay, handle);
         }
 
-        // Update transform on both overlays
+        // Update transform
         {
             let s = state.lock().unwrap();
-            update_transform(&system, &mut overlay, &[ha, hb], &mut smoothed, &s);
+            update_transform(&system, &mut overlay, &[handle], &mut smoothed, &s);
         }
 
         std::thread::sleep(Duration::from_millis(10));
