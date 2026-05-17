@@ -86,12 +86,7 @@ fn create_dynamic_texture(device: &ID3D11Device, w: u32, h: u32) -> anyhow::Resu
     };
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe {
-        let data = D3D11_SUBRESOURCE_DATA {
-            pSysMem: std::ptr::null(), // will upload via UpdateSubresource
-            SysMemPitch: w * 4,
-            SysMemSlicePitch: 0,
-        };
-        device.CreateTexture2D(&desc, Some(&data), Some(&mut texture))
+        device.CreateTexture2D(&desc, None, Some(&mut texture))
             .map_err(|e| anyhow::anyhow!("CreateTexture2D: {e}"))?;
     }
     texture.ok_or_else(|| anyhow::anyhow!("null texture"))
