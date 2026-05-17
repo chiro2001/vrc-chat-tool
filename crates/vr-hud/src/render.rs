@@ -5,7 +5,6 @@ use crate::state::OverlayState;
 use fontdue::Font;
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 use openvr::overlay::OverlayHandle;
-
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Direct3D::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
@@ -220,17 +219,30 @@ impl OverlayRenderer {
         }
     }
 
-    /// Submit D3D11 texture to OpenVR overlay via raw FFI (set_overlay_texture).
-    fn submit_texture(&self, overlay: &openvr::Overlay, handle: OverlayHandle) {
-        // Access the internal function table via pointer cast (Overlay is newtype over fn table)
-        let fn_table: &openvr_sys::VR_IVROverlay_FnTable = unsafe {
-            &*(overlay as *const openvr::Overlay as *const openvr_sys::VR_IVROverlay_FnTable)
-        };
-
+    /// Submit D3D11 texture to OpenVR overlay via raw FFI.
+    fn submit_texture(&self, _overlay: &openvr::Overlay, handle: OverlayHandle) {
         let ovr_texture = openvr_sys::Texture_t {
             handle: &self.texture as *const _ as *mut std::ffi::c_void,
             eType: openvr_sys::ETextureType_TextureType_DirectX,
             eColorSpace: openvr_sys::EColorSpace_ColorSpace_Auto,
+        };
+
+        // Get the IVROverlay function table via the official interface
+        static mut FN_TABLE: Option<*const openvr_sys::VR_IVROverlay_FnTable> = None;
+        let fn_table: &openvr_sys::VR_IVROverlay_FnTable = unsafe {
+            if FN_TABLE.is_none() {
+                let mut error = openvr_sys::EVRInitError_VRInitError_None;
+                let ptr = openvr_sys::VR_GetGenericInterface(
+                    b"IVROverlay_019\0".as_ptr() as *const i8,
+                    &mut error,
+                );
+                if error != openvr_sys::EVRInitError_VRInitError_None {
+                    tracing::warn!("set_overlay_texture: interface not found");
+                    return;
+                }
+                FN_TABLE = Some(ptr as *const openvr_sys::VR_IVROverlay_FnTable);
+            }
+            &*FN_TABLE.unwrap()
         };
 
         unsafe {
