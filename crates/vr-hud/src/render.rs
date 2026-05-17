@@ -79,14 +79,19 @@ fn create_dynamic_texture(device: &ID3D11Device, w: u32, h: u32) -> anyhow::Resu
         Width: w, Height: h, MipLevels: 1, ArraySize: 1,
         Format: Common::DXGI_FORMAT_B8G8R8A8_UNORM,
         SampleDesc: Common::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-        Usage: D3D11_USAGE_DYNAMIC,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
+        CPUAccessFlags: 0,
         MiscFlags: 0,
     };
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe {
-        device.CreateTexture2D(&desc, None, Some(&mut texture))
+        let data = D3D11_SUBRESOURCE_DATA {
+            pSysMem: std::ptr::null(), // will upload via UpdateSubresource
+            SysMemPitch: w * 4,
+            SysMemSlicePitch: 0,
+        };
+        device.CreateTexture2D(&desc, Some(&data), Some(&mut texture))
             .map_err(|e| anyhow::anyhow!("CreateTexture2D: {e}"))?;
     }
     texture.ok_or_else(|| anyhow::anyhow!("null texture"))
@@ -289,24 +294,27 @@ impl OverlayRenderer {
         let table = self.overlay_fn_table
             .ok_or_else(|| anyhow::anyhow!("overlay fn table not initialized"))?;
 
-        // Upload ALL rows to avoid garbage from MAP_WRITE_DISCARD
+        // Upload all rows via UpdateSubresource (no Map needed for DEFAULT usage)
+        let row_bytes = (self.tex_w * 4) as u32;
         let total_bytes = self.tex_w * MAX_H * 4;
         let slice = &self.pixels[..total_bytes];
 
-        unsafe {
-            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            context.Map(tex, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut mapped))
-                .map_err(|e| anyhow::anyhow!("D3D11 Map: {e}"))?;
+        let box_dst = D3D11_BOX {
+            left: 0, top: 0, front: 0,
+            right: self.tex_w as u32,
+            bottom: MAX_H as u32,
+            back: 1,
+        };
 
-            let src_row = self.tex_w * 4;
-            let dst_row = mapped.RowPitch as usize;
-            let dst = mapped.pData as *mut u8;
-            for row in 0..MAX_H {
-                std::ptr::copy_nonoverlapping(
-                    slice.as_ptr().add(row * src_row),
-                    dst.add(row * dst_row), src_row);
-            }
-            context.Unmap(tex, 0);
+        unsafe {
+            context.UpdateSubresource(
+                tex,
+                0,                                // DstSubresource
+                Some(&box_dst),                   // pDstBox (None = full texture)
+                slice.as_ptr() as *const c_void,  // pSrcData
+                row_bytes,                        // SrcRowPitch
+                0,                                // SrcDepthPitch
+            );
         }
 
         let mut vr_tex = openvr_sys::Texture_t {
