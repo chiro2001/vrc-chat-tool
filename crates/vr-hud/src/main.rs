@@ -61,6 +61,8 @@ fn main() -> anyhow::Result<()> {
     let mut last_visible = true;
     let start_time = std::time::Instant::now();
     const CONNECT_TIMEOUT_SECS: u64 = 30;
+    let mut change_count: u32 = 0;
+    const RESTART_AFTER_CHANGES: u32 = 100;
 
     loop {
         while let Some(_) = system.poll_next_event() {}
@@ -123,6 +125,11 @@ fn main() -> anyhow::Result<()> {
             let s = state.lock().unwrap();
             if let Err(e) = renderer.render_frame(&mut overlay, handle, &s) {
                 tracing::warn!("Render: {e}");
+            }
+            change_count += 1;
+            if change_count >= RESTART_AFTER_CHANGES {
+                tracing::info!("Content changed {} times, restarting to prevent display freeze", change_count);
+                return Ok(());
             }
         } else if !connected {
             let _ = renderer.render_disconnected(&mut overlay, handle);

@@ -186,8 +186,6 @@ pub fn start_overlay_ipc() {
 
             // Data loop
             let interval = Duration::from_millis(33);
-            let mut msg_count: u32 = 0;
-            const HUD_RESTART_INTERVAL: u32 = 100;
             loop {
                 if !IPC_RUNNING.load(Ordering::Relaxed) {
                     // Send bye before closing — triggers graceful HUD shutdown
@@ -196,18 +194,6 @@ pub fn start_overlay_ipc() {
                     unsafe { WriteFile(handle, bye.as_ptr() as *const c_void, bye.len() as u32, &mut w, std::ptr::null_mut()); }
                     log::info("ipc", "Sent bye, closing pipe");
                     break;
-                }
-
-                // Periodic HUD restart to prevent display freeze (known OpenVR issue)
-                if msg_count >= HUD_RESTART_INTERVAL {
-                    log::info("ipc", &format!("Restarting HUD after {} messages", msg_count));
-                    let bye = b"{\"type\":\"bye\"}\n";
-                    let mut w: u32 = 0;
-                    unsafe { WriteFile(handle, bye.as_ptr() as *const c_void, bye.len() as u32, &mut w, std::ptr::null_mut()); }
-                    crate::hud::kill();
-                    std::thread::sleep(Duration::from_millis(500)); // wait for OpenVR cleanup
-                    crate::hud::spawn();
-                    break; // outer loop will reconnect
                 }
 
                 let msg = OVERLAY_MSG.lock().unwrap().clone();
@@ -229,7 +215,6 @@ pub fn start_overlay_ipc() {
                     break;
                 }
 
-                msg_count += 1;
                 thread::sleep(interval);
             }
 
