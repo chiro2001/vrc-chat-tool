@@ -31,6 +31,7 @@ function App() {
   const pendingProviderRef = useRef<string | null>(null);
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
+  const [vadActive, setVadActive] = useState(false);
 
   // Test recording state
   const [testRecordings, setTestRecordings] = useState<TestRecording[]>([]);
@@ -94,7 +95,8 @@ function App() {
     vr_controller_enabled: false,
     vr_hud_enabled: true,
   });
-
+  const providerRef = useRef(config.asr_provider);
+  providerRef.current = config.asr_provider;
 
 
   // STT model status
@@ -169,6 +171,7 @@ function App() {
       setLastResult("");
       setLastError("");
       setTriggerHeardText("");
+      if (providerRef.current === "tencent") setVadActive(true);
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-partial", (event) => {
@@ -188,6 +191,7 @@ function App() {
       setCurrentSentence("");
       setStopping(false);
       setApiState("idle");
+      setVadActive(false);
       // Auto-restart if provider was switched during recording
       const pending = pendingProviderRef.current;
       pendingProviderRef.current = null;
@@ -204,6 +208,7 @@ function App() {
       setApiState("error");
       setLastError(event.payload);
       setStopping(false);
+      setVadActive(false);
     }).then((fn) => unlisteners.push(fn));
 
     // Tencent usage update — absolute value from backend
@@ -439,6 +444,12 @@ function App() {
             {apiState === "done" && t("status.done")}
             {apiState === "error" && t("status.error")}
           </span>
+          {config.asr_provider === "tencent" && (
+            <span className={`vad-badge ${vadActive ? "vad-active" : "vad-idle"}`}>
+              <span className="vad-dot" />
+              {vadActive ? t("config.vadOn") : t("config.vadOff")}
+            </span>
+          )}
         </div>
       </header>
 

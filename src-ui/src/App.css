@@ -80,6 +80,44 @@ header h1 {
   border: 1px solid #f44336;
 }
 
+/* ---- VAD Badge (Tencent Cloud send indicator) ---- */
+.vad-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.vad-active {
+  background: #0a3a1a;
+  color: #4fc3f7;
+  border: 1px solid #0288d1;
+  animation: vadPulse 1.0s ease-in-out infinite;
+}
+
+.vad-idle {
+  background: #2a2a2a;
+  color: #777;
+  border: 1px solid #444;
+}
+
+.vad-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@keyframes vadPulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
 @keyframes pulse {
   0% { opacity: 1; }
   50% { opacity: 0.5; }
