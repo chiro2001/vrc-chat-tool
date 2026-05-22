@@ -45,10 +45,10 @@ pub fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(
     if config.vr_hud_enabled && !vr_hud_was_enabled {
         log::info("main", "VR HUD enabled, restarting IPC server and spawning...");
         ipc_server::start_overlay_ipc();
-        crate::spawn_vr_hud();
+        vrc_chat_tool::hud::spawn();
     } else if !config.vr_hud_enabled && vr_hud_was_enabled {
         log::info("main", "VR HUD disabled, killing...");
-        crate::kill_vr_hud();
+        vrc_chat_tool::hud::kill();
     }
 
     Ok(())

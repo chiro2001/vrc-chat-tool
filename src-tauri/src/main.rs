@@ -1,8 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{atomic::Ordering, Arc};
 use std::thread;
-use std::process::{Child, Command};
 use tauri::Manager;
 use vrc_chat_tool::config;
 use vrc_chat_tool::trigger;
@@ -43,66 +42,7 @@ fn is_steamvr_running() -> bool {
 
 // --- Helpers ---
 
-static HUD_CHILD: Mutex<Option<Child>> = Mutex::new(None);
-
-pub(crate) fn spawn_vr_hud() {
-    let exe_dir = match std::env::current_exe() {
-        Ok(p) => p.parent().map(|p| p.to_path_buf()),
-        Err(_) => None,
-    };
-    if let Some(dir) = exe_dir {
-        // Try same dir first, then sibling release/debug dirs
-        let candidates = [
-            dir.join("vrc-chat-hud.exe"),
-            dir.parent().map(|p| p.join("release").join("vrc-chat-hud.exe")).unwrap_or_default(),
-            dir.parent().map(|p| p.join("debug").join("vrc-chat-hud.exe")).unwrap_or_default(),
-        ];
-        for hud in &candidates {
-            if hud.exists() {
-                log::info("main", &format!("Spawning VR HUD: {}", hud.display()));
-                match Command::new(hud).spawn() {
-                    Ok(child) => {
-                        *HUD_CHILD.lock().unwrap() = Some(child);
-                        return;
-                    }
-                    Err(e) => log::warn("main", &format!("Failed to spawn HUD: {}", e)),
-                }
-            }
-        }
-        log::warn("main", &format!(
-            "HUD binary not found. Tried:\n  {}\n  {}\n  {}",
-            candidates[0].display(),
-            candidates[1].display(),
-            candidates[2].display(),
-        ));
-    }
-}
-
-pub(crate) fn kill_vr_hud() {
-    if let Some(child) = HUD_CHILD.lock().unwrap().take() {
-        log::info("main", "Stopping VR HUD (sending bye via IPC)");
-        // Signal IPC server to send bye — HUD receives it and exits gracefully
-        vrc_chat_tool::ipc_server::stop_overlay_ipc();
-        // Wait for graceful exit in background — don't block the UI thread
-        std::thread::spawn(move || {
-            let mut child = child;
-            for _ in 0..150 {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        log::info("main", &format!(
-                            "VR HUD exited gracefully (code: {:?})",
-                            status.code()
-                        ));
-                        return;
-                    }
-                    _ => std::thread::sleep(std::time::Duration::from_millis(100)),
-                }
-            }
-            log::error("main", "VR HUD did not exit after 15s — OpenVR resources may leak");
-            // Intentionally NOT force-killing: would leak OpenVR GPU resources
-        });
-    }
-}
+// HUD lifecycle functions moved to vrc_chat_tool::hud
 
 // --- Main Entry ---
 fn main() {
@@ -159,7 +99,7 @@ fn main() {
 
     // Spawn VR HUD companion process if enabled and SteamVR is running
     if config.vr_hud_enabled && config::is_steamvr_running() {
-        let _hud_child = spawn_vr_hud();
+        vrc_chat_tool::hud::spawn();
     } else {
         log::info("main", &format!(
             "VR HUD not started (enabled={}, steamvr_running={})",
@@ -313,7 +253,7 @@ fn main() {
         ])
         .on_window_event(|event| {
             if let tauri::WindowEvent::Destroyed = event.event() {
-                kill_vr_hud();
+                vrc_chat_tool::hud::kill();
                 if let Some(overlay) = event.window().app_handle().get_window("overlay") {
                     let _ = overlay.close();
                 }

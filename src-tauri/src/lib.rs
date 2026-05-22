@@ -11,3 +11,4 @@ pub mod input;
 pub mod vr;
 pub mod ipc_server;
 pub mod i18n;
+pub mod hud;
