@@ -25,4 +25,4 @@ windows = { version = "0.62", features = [
 ] }
 
 # IPC: named pipe client
-winapi = { version = "0.3", features = ["winbase", "fileapi", "namedpipeapi", "handleapi", "minwinbase", "memoryapi", "winerror", "errhandlingapi"] }
+winapi = { version = "0.3", features = ["winbase", "fileapi", "namedpipeapi", "handleapi", "minwinbase", "memoryapi", "winerror", "errhandlingapi", "securitybaseapi", "tlhelp32", "processthreadsapi", "winnt"] }

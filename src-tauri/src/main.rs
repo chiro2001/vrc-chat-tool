@@ -114,9 +114,15 @@ fn main() {
         };
     }
 
-    // Spawn VR HUD companion process if enabled and SteamVR is running
+    // Spawn VR HUD companion process if enabled and SteamVR is running.
+    // Skip if SteamVR is admin but we're not — would cause resource release failures.
     if config.vr_hud_enabled && config::is_steamvr_running() {
-        vrc_chat_tool::hud::spawn();
+        let (compat_ok, _) = config::check_steamvr_compat();
+        if compat_ok {
+            vrc_chat_tool::hud::spawn();
+        } else {
+            log::warn("main", "VR HUD skipped: SteamVR runs as admin but app does not. Restart app as admin.");
+        }
     } else {
         log::info("main", &format!(
             "VR HUD not started (enabled={}, steamvr_running={})",

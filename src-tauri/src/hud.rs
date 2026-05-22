@@ -9,7 +9,14 @@ static HUD_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
 /// Spawn the VR HUD companion process (vrc-chat-hud.exe).
 /// Searches exe dir, sibling release/debug dirs for the binary.
+/// Refuses to spawn if SteamVR/admin elevation mismatch is detected.
 pub fn spawn() {
+    let (compat_ok, compat_msg) = crate::config::check_steamvr_compat();
+    if !compat_ok {
+        log::warn("hud", &format!("Refusing to spawn HUD: {}", compat_msg));
+        return;
+    }
+
     let exe_dir = match std::env::current_exe() {
         Ok(p) => p.parent().map(|p| p.to_path_buf()),
         Err(_) => None,
