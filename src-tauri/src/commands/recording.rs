@@ -143,12 +143,8 @@ pub(crate) fn start_recording_inner(
                 let vad: RefCell<Option<VadFilter>> = RefCell::new(
                     if vad_enabled { Some(VadFilter::default_16000()) } else { None }
                 );
-                // Tencent silence flush: after speech ends, send ~1s of silence
-                // so the API can detect the sentence boundary, then cut off.
                 let flush_remaining: RefCell<usize> = RefCell::new(0usize);
-                const FLUSH_TARGET_SAMPLES: usize = 16000; // ~1s @ 16kHz
-                // Keep-alive: Tencent API disconnects after 15s of silence (error 4008).
-                // Send a short silence chunk every ~5s to keep the connection alive.
+                const FLUSH_TARGET_SAMPLES: usize = 16000;
                 let last_send: RefCell<Instant> = RefCell::new(Instant::now());
 
                 let result = capture.capture_streaming(
@@ -222,7 +218,7 @@ pub(crate) fn start_recording_inner(
                                 // Send keep-alive silence every 5s.
                                 let elapsed = last_send.borrow().elapsed();
                                 if elapsed.as_secs() >= 5 {
-                                    let keepalive: Vec<u8> = vec![0u8; 160]; // 5ms silence @ 16kHz 16bit mono
+                                    let keepalive: Vec<u8> = vec![0u8; 640]; // 20ms silence @ 16kHz 16bit mono
                                     bytes_sent_clone.fetch_add(keepalive.len() as u64, Ordering::Relaxed);
                                     let _ = pcm_tx.blocking_send(keepalive);
                                     *last_send.borrow_mut() = Instant::now();
@@ -312,11 +308,12 @@ pub(crate) fn start_recording_inner(
                         }
                     },
                 ).await
-            })?;
-
+            });
+            // Always stop capture and join, even on error, to release audio device
+            state::SHOULD_STOP.store(true, Ordering::SeqCst);
             let _ = capture_thread.join();
 
-            Ok(recognized_text)
+            recognized_text.map_err(|e| anyhow::anyhow!("{}", e))
         })();
 
         trigger::resume_audio();
