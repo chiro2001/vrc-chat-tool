@@ -449,13 +449,13 @@ function App() {
             {apiState === "recognizing" && t("status.recognizing")}
             {apiState === "done" && t("status.done")}
             {apiState === "error" && t("status.error")}
+            {config.asr_provider === "tencent" && vadStatus !== "idle" && (
+              <span className={`status-vad ${vadStatus === "speech" ? "vad-speech" : "vad-silence"}`}>
+                <span className="vad-dot" />
+                {vadStatus === "speech" ? t("config.vadOn") : t("config.vadOff")}
+              </span>
+            )}
           </span>
-          {config.asr_provider === "tencent" && vadStatus !== "idle" && (
-            <span className={`vad-badge ${vadStatus === "speech" ? "vad-active" : "vad-idle"}`}>
-              <span className="vad-dot" />
-              {vadStatus === "speech" ? t("config.vadOn") : t("config.vadOff")}
-            </span>
-          )}
         </div>
       </header>
 
