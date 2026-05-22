@@ -209,7 +209,9 @@ pub fn start_overlay_ipc() {
                     log::info("ipc", "VR HUD client disconnected");
                     // If HUD process died externally, spawn a new one for next connection
                     if !crate::hud::is_running() {
-                        log::info("ipc", "HUD process not running, spawning new one");
+                        log::info("ipc", "HUD process not running, waiting for OpenVR cleanup...");
+                        std::thread::sleep(Duration::from_millis(1000));
+                        log::info("ipc", "Spawning new HUD");
                         crate::hud::spawn();
                     }
                     break;

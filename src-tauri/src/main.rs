@@ -40,6 +40,18 @@ fn is_steamvr_running() -> bool {
     config::is_steamvr_running()
 }
 
+#[derive(serde::Serialize)]
+struct SteamvrCompatResult {
+    ok: bool,
+    message: String,
+}
+
+#[tauri::command]
+fn check_steamvr_compat() -> SteamvrCompatResult {
+    let (ok, message) = config::check_steamvr_compat();
+    SteamvrCompatResult { ok, message }
+}
+
 // --- Helpers ---
 
 // HUD lifecycle functions moved to vrc_chat_tool::hud
@@ -250,6 +262,7 @@ fn main() {
             commands::overlay::toggle_overlay_window,
             commands::overlay::is_overlay_visible,
             is_steamvr_running,
+            check_steamvr_compat,
         ])
         .on_window_event(|event| {
             if let tauri::WindowEvent::Destroyed = event.event() {

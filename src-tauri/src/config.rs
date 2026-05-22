@@ -265,3 +265,113 @@ pub fn is_steamvr_running() -> bool {
         })
         .unwrap_or(false)
 }
+
+/// Check if the current process is running with administrator privileges.
+pub fn is_self_elevated() -> bool {
+    unsafe {
+        use winapi::um::processthreadsapi::{GetCurrentProcess, OpenProcessToken};
+        use winapi::um::securitybaseapi::GetTokenInformation;
+        use winapi::um::winnt::{TokenElevation, TOKEN_QUERY, TOKEN_ELEVATION};
+        let mut token: *mut winapi::ctypes::c_void = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut elevation: TOKEN_ELEVATION = std::mem::zeroed();
+        let mut size: u32 = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let result = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut winapi::ctypes::c_void,
+            size,
+            &mut size,
+        );
+        winapi::um::handleapi::CloseHandle(token);
+        result != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+/// Check if vrserver.exe is running with administrator privileges.
+/// Returns None if vrserver.exe is not running.
+pub fn is_steamvr_elevated() -> Option<bool> {
+    use winapi::um::tlhelp32::{
+        CreateToolhelp32Snapshot, Process32First, Process32Next,
+        PROCESSENTRY32, TH32CS_SNAPPROCESS,
+    };
+    use winapi::um::processthreadsapi::OpenProcessToken;
+    use winapi::um::securitybaseapi::GetTokenInformation;
+    use winapi::um::winnt::{TokenElevation, TOKEN_QUERY, TOKEN_ELEVATION, PROCESS_QUERY_INFORMATION};
+    use winapi::um::handleapi::CloseHandle;
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() {
+            return None;
+        }
+
+        let mut entry: PROCESSENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+
+        if Process32First(snapshot, &mut entry) == 0 {
+            CloseHandle(snapshot);
+            return None;
+        }
+
+        loop {
+            let name = std::ffi::CStr::from_ptr(entry.szExeFile.as_ptr())
+                .to_string_lossy();
+            let name = name.trim_end_matches('\0');
+            if name.eq_ignore_ascii_case("vrserver.exe") {
+                let pid = entry.th32ProcessID;
+                let h = winapi::um::processthreadsapi::OpenProcess(
+                    PROCESS_QUERY_INFORMATION, 0, pid,
+                );
+                if h.is_null() {
+                    // Can't query — likely privilege mismatch (SteamVR is admin, we're not)
+                    CloseHandle(snapshot);
+                    return Some(true); // Assume elevated if we can't query
+                }
+                let mut token: *mut winapi::ctypes::c_void = std::ptr::null_mut();
+                let ok = OpenProcessToken(h, TOKEN_QUERY, &mut token);
+                CloseHandle(h);
+                if ok == 0 {
+                    CloseHandle(snapshot);
+                    return Some(true); // Can't open token → likely elevated
+                }
+                let mut elevation: TOKEN_ELEVATION = std::mem::zeroed();
+                let mut size: u32 = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+                GetTokenInformation(
+                    token,
+                    TokenElevation,
+                    &mut elevation as *mut _ as *mut winapi::ctypes::c_void,
+                    size,
+                    &mut size,
+                );
+                CloseHandle(token);
+                CloseHandle(snapshot);
+                return Some(elevation.TokenIsElevated != 0);
+            }
+            if Process32Next(snapshot, &mut entry) == 0 {
+                break;
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    None
+}
+
+/// Check SteamVR compatibility: returns warning if SteamVR is elevated but we are not.
+/// Returns (ok, message).
+pub fn check_steamvr_compat() -> (bool, String) {
+    let self_elevated = is_self_elevated();
+    let svr_elevated = is_steamvr_elevated();
+
+    match svr_elevated {
+        None => (true, String::new()), // SteamVR not running, no issue
+        Some(true) if !self_elevated => (
+            false,
+            "SteamVR is running as administrator, but this app is not. \
+             VR HUD may fail to release resources. Restart this app as administrator.".into(),
+        ),
+        _ => (true, String::new()), // Both elevated or both not
+    }
+}

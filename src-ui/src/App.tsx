@@ -108,6 +108,9 @@ function App() {
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [currentModelName, setCurrentModelName] = useState("");
 
+  // SteamVR compatibility warning
+  const [compatWarning, setCompatWarning] = useState("");
+
   // Load config on mount
   useEffect(() => {
     invoke<AppConfig>("get_config")
@@ -117,6 +120,11 @@ function App() {
       .catch((e) => {
         console.error("Failed to load config:", e);
       });
+
+    // Check SteamVR compatibility (admin mode mismatch)
+    invoke<{ ok: boolean; message: string }>("check_steamvr_compat")
+      .then((r) => { if (!r.ok) setCompatWarning(r.message); })
+      .catch(() => {});
 
     // Load available STT models
     invoke<AvailableModel[]>("get_available_models")
@@ -455,6 +463,11 @@ function App() {
               </span>
             )}
           </span>
+          {compatWarning && (
+            <span className="compat-warning" title={compatWarning}>
+              ⚠ VR
+            </span>
+          )}
         </div>
       </header>
 
