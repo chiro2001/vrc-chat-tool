@@ -107,6 +107,7 @@ pub(crate) fn start_recording_inner(
 
             let app_for_volume = app.clone();
             let app_for_partial = app.clone();
+            let app_for_vad = app.clone();
 
             let _ = app.emit_all("recording-started", "");
 
@@ -174,9 +175,25 @@ pub(crate) fn start_recording_inner(
                         // - local_embedded: pre-filters to reduce engine load
                         // - local (remote STT): always sends, VAD is server-side
                         if let Some(ref mut v) = *vad.borrow_mut() {
-                            if v.process_i16(&chunk) == VadDecision::Speech {
+                            let prev_speech = v.is_speech();
+                            let decision = v.process_i16(&chunk);
+                            let now_speech = v.is_speech();
+
+                            // Emit VAD state change to frontend
+                            if now_speech != prev_speech {
+                                let status = if now_speech { "speech" } else { "silence" };
+                                let _ = app_for_vad.emit_all("vad-status-change", status);
+                            }
+
+                            if decision == VadDecision::Speech {
                                 bytes_sent_clone.fetch_add(chunk.len() as u64, Ordering::Relaxed);
                                 let _ = pcm_tx.blocking_send(chunk);
+                            } else if prev_speech && !now_speech && is_tencent {
+                                // Speech→Silence transition: send a short silence chunk
+                                // to trigger Tencent API sentence finalization.
+                                let silence: Vec<u8> = vec![0u8; 3200]; // 100ms @ 16kHz 16bit mono
+                                bytes_sent_clone.fetch_add(silence.len() as u64, Ordering::Relaxed);
+                                let _ = pcm_tx.blocking_send(silence);
                             }
                         } else {
                             // VAD disabled → send all

@@ -31,7 +31,7 @@ function App() {
   const pendingProviderRef = useRef<string | null>(null);
   const [lastError, setLastError] = useState("");
   const [currentVolume, setCurrentVolume] = useState(0);
-  const [vadActive, setVadActive] = useState(false);
+  const [vadStatus, setVadStatus] = useState<"idle" | "speech" | "silence">("idle");
 
   // Test recording state
   const [testRecordings, setTestRecordings] = useState<TestRecording[]>([]);
@@ -171,7 +171,7 @@ function App() {
       setLastResult("");
       setLastError("");
       setTriggerHeardText("");
-      if (providerRef.current === "tencent") setVadActive(true);
+      if (providerRef.current === "tencent") setVadStatus("speech");
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-partial", (event) => {
@@ -191,7 +191,7 @@ function App() {
       setCurrentSentence("");
       setStopping(false);
       setApiState("idle");
-      setVadActive(false);
+      setVadStatus("idle");
       // Auto-restart if provider was switched during recording
       const pending = pendingProviderRef.current;
       pendingProviderRef.current = null;
@@ -208,7 +208,7 @@ function App() {
       setApiState("error");
       setLastError(event.payload);
       setStopping(false);
-      setVadActive(false);
+      setVadStatus("idle");
     }).then((fn) => unlisteners.push(fn));
 
     // Tencent usage update — absolute value from backend
@@ -218,6 +218,12 @@ function App() {
 
     listen<number>("volume-update", (event) => {
       setCurrentVolume(event.payload);
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("vad-status-change", (event) => {
+      if (config.asr_provider === "tencent") {
+        setVadStatus(event.payload as "speech" | "silence");
+      }
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("hotkey-toggle", () => {
@@ -444,10 +450,10 @@ function App() {
             {apiState === "done" && t("status.done")}
             {apiState === "error" && t("status.error")}
           </span>
-          {config.asr_provider === "tencent" && (
-            <span className={`vad-badge ${vadActive ? "vad-active" : "vad-idle"}`}>
+          {config.asr_provider === "tencent" && vadStatus !== "idle" && (
+            <span className={`vad-badge ${vadStatus === "speech" ? "vad-active" : "vad-idle"}`}>
               <span className="vad-dot" />
-              {vadActive ? t("config.vadOn") : t("config.vadOff")}
+              {vadStatus === "speech" ? t("config.vadOn") : t("config.vadOff")}
             </span>
           )}
         </div>
