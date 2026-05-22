@@ -222,7 +222,7 @@ pub(crate) fn start_recording_inner(
                                 // Send keep-alive silence every 5s.
                                 let elapsed = last_send.borrow().elapsed();
                                 if elapsed.as_secs() >= 5 {
-                                    let keepalive: Vec<u8> = vec![0u8; 3200]; // 100ms silence
+                                    let keepalive: Vec<u8> = vec![0u8; 160]; // 5ms silence @ 16kHz 16bit mono
                                     bytes_sent_clone.fetch_add(keepalive.len() as u64, Ordering::Relaxed);
                                     let _ = pcm_tx.blocking_send(keepalive);
                                     *last_send.borrow_mut() = Instant::now();
