@@ -306,7 +306,7 @@ function App() {
     if (apiState === "recording" || apiState === "recognizing") {
       setStopping(true);
       invoke("stop_recording").catch(console.error);
-    } else if (apiState === "idle") {
+    } else if (apiState === "idle" || apiState === "error" || apiState === "done") {
       invoke("start_recording", { deviceIndex: selectedDeviceIndex }).catch(
         (e) => {
           setApiState("error");
