@@ -297,6 +297,7 @@ fn run_recording_pipeline(cfg: &AppConfig) -> Result<String, Box<dyn std::error:
         cfg.tencent_app_id.clone(),
         cfg.tencent_secret_id.clone(),
         cfg.tencent_secret_key.clone(),
+        true,
     );
 
     let trigger_stop_partial = cfg.trigger_stop.clone();

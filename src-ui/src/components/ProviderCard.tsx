@@ -205,6 +205,13 @@ export default function ProviderCard({
             </span>
           </div>
           {hasTencentCreds && (
+            <>
+            <div className="provider-card-row">
+              <span className="provider-card-label">VAD</span>
+              <span className={`provider-card-status ${config.vad_enabled ? "ok" : ""}`}>
+                {config.vad_enabled ? t("config.vadOn") : t("config.vadOff")}
+              </span>
+            </div>
             <div className="provider-card-row">
               <span className="provider-card-label">{t("config.tencentUsage")}</span>
               <span className="provider-card-value">
@@ -216,6 +223,7 @@ export default function ProviderCard({
                 })()}
               </span>
             </div>
+            </>
           )}
           {!hasTencentCreds && onOpenSettings && (
             <div className="provider-card-row provider-card-action">

@@ -154,6 +154,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub floating_window_enabled: bool,
 
+    // ---- VAD ----
+    #[serde(default)]
+    pub vad_enabled: bool,
+
     // ---- VR controller ----
     #[serde(default)]
     pub vr_controller_enabled: bool,
@@ -198,6 +202,7 @@ impl Default for AppConfig {
             keyboard_input_enabled: false,
             keyboard_input_mode: "sendinput".to_string(),
             floating_window_enabled: true,
+            vad_enabled: false,
             vr_controller_enabled: false,
             vr_hud: VrHudConfig::default(),
             vr_hud_enabled: true,

@@ -101,6 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.tencent_app_id.clone(),
             config.tencent_secret_id.clone(),
             config.tencent_secret_key.clone(),
+            true,
         );
 
         let pcm_len = pcm_data.len();

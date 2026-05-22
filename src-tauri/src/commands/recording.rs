@@ -1,4 +1,4 @@
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use std::thread;
 use tauri::Manager;
 use vrc_chat_tool::config;
@@ -14,13 +14,6 @@ use vrc_chat_tool::i18n;
 
 fn model_display_name(provider: &str, config: &config::AppConfig) -> String {
     i18n::provider_short(provider, &config.language)
-}
-
-/// Track active speech duration for Tencent billing estimate
-struct TencentUsageTracker {
-    active_samples: u64,    // cumulative speech samples detected
-    base_seconds: u64,      // previously accumulated seconds from config
-    last_was_speech: bool,  // previous chunk had speech
 }
 
 #[tauri::command]
@@ -56,7 +49,7 @@ pub(crate) fn start_recording_inner(
     let cfg = cfg.clone();
     let trigger_stop_partial = cfg.trigger_stop.clone();
     let trigger_stop_sentence = cfg.trigger_stop.clone();
-        thread::spawn(move || {
+    thread::spawn(move || {
         let is_tencent = cfg.asr_provider == "tencent";
         log::info("recorder", &format!("Recording started (kb={})", state::CURRENT_CONFIG.lock().unwrap().as_ref().map(|c| c.keyboard_input_enabled).unwrap_or(false)));
 
@@ -80,17 +73,9 @@ pub(crate) fn start_recording_inner(
             ..Default::default()
         };
 
-        // VAD-based usage tracking for Tencent
-        let base_seconds = if is_tencent {
-            state::CURRENT_CONFIG.lock().unwrap()
-                .as_ref().map(|c| c.tencent_usage_seconds).unwrap_or(0)
-        } else { 0 };
-        let usage_tracker: Arc<Mutex<TencentUsageTracker>> = Arc::new(Mutex::new(TencentUsageTracker {
-            active_samples: 0,
-            base_seconds,
-            last_was_speech: false,
-        }));
-        let usage_tracker_clone = usage_tracker.clone();
+        // Record API start time for actual Tencent Cloud usage tracking
+        let api_start = std::time::Instant::now();
+
         let result: Result<String, anyhow::Error> = (|| -> anyhow::Result<String> {
             let capture = match device_index {
                 Some(idx) => audio::capture::AudioCapture::new_by_index(idx)?,
@@ -138,6 +123,7 @@ pub(crate) fn start_recording_inner(
                         app_id.clone(),
                         secret_id.clone(),
                         secret_key.clone(),
+                        cfg.vad_enabled,
                     )
                 )
             };
@@ -158,7 +144,7 @@ pub(crate) fn start_recording_inner(
                         let volume = ((rms / 32768.0).min(1.0)) as f32;
                         let _ = app_for_volume.emit_all("volume-update", volume);
 
-                        // Detect speech for VAD-based status
+                        // Detect speech for VAD-based status (IPC overlay only)
                         let energy = rms / 32767.0;
                         let has_speech = energy >= 0.005;
 
@@ -170,25 +156,6 @@ pub(crate) fn start_recording_inner(
                             } else if msg.status.as_deref() == Some("recognizing") {
                                 msg.status = Some("idle".into());
                             }
-                        }
-
-                        // Track VAD-based speech duration for Tencent billing
-                        if is_tencent {
-                            let energy = rms / 32767.0;
-                            let has_speech = energy >= 0.005;
-                            let samples = (chunk.len() / 2) as u64;
-                            let mut tracker = usage_tracker_clone.lock().unwrap();
-                            if has_speech {
-                                tracker.active_samples += samples;
-                                if !tracker.last_was_speech {
-                                    tracker.last_was_speech = true;
-                                }
-                            } else if tracker.last_was_speech {
-                                tracker.last_was_speech = false;
-                            }
-                            // Emit current total (base + session) every chunk
-                            let total = tracker.base_seconds + (tracker.active_samples / 16000);
-                            let _ = app_for_volume.emit_all("tencent-usage-updated", total);
                         }
 
                         let _ = pcm_tx.blocking_send(chunk);
@@ -279,22 +246,22 @@ pub(crate) fn start_recording_inner(
         trigger::resume_audio();
         state::IS_RECORDING.store(false, Ordering::SeqCst);
 
-        // Track Tencent Cloud API usage time (VAD-based speech duration)
+        // Track Tencent Cloud API usage time (actual WebSocket connection duration)
         if is_tencent {
-            let tracker = usage_tracker.lock().unwrap();
-            let speech_secs = tracker.active_samples / 16000;
-            if speech_secs > 0 {
+            let elapsed = api_start.elapsed().as_secs();
+            if elapsed > 0 {
                 let total = {
                     let mut config_guard = state::CURRENT_CONFIG.lock().unwrap();
                     if let Some(ref mut c) = *config_guard {
-                        c.tencent_usage_seconds += speech_secs;
+                        c.tencent_usage_seconds += elapsed;
                         let _ = c.save();
                         c.tencent_usage_seconds
                     } else {
-                        speech_secs
+                        elapsed
                     }
                 };
                 let _ = app.emit_all("tencent-usage-updated", total);
+                log::info("tencent", &format!("API connection time: {}s, cumulative: {}s", elapsed, total));
             }
         }
 
