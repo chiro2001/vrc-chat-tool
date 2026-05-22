@@ -1,4 +1,5 @@
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::cell::RefCell;
 use std::thread;
 use tauri::Manager;
 use vrc_chat_tool::config;
@@ -11,6 +12,7 @@ use vrc_chat_tool::state;
 use crate::history;
 
 use vrc_chat_tool::i18n;
+use stt_server::{VadFilter, VadDecision};
 
 fn model_display_name(provider: &str, config: &config::AppConfig) -> String {
     i18n::provider_short(provider, &config.language)
@@ -73,8 +75,14 @@ pub(crate) fn start_recording_inner(
             ..Default::default()
         };
 
-        // Record API start time for actual Tencent Cloud usage tracking
-        let api_start = std::time::Instant::now();
+        // VAD filter — only for backends where local VAD reduces API cost/engine load.
+        // Remote STT (local) handles VAD server-side → skip.
+        let use_vad = is_tencent || cfg.asr_provider == "local_embedded";
+        let vad_enabled = cfg.vad_enabled && use_vad;
+
+        // Track actual audio bytes sent to Tencent API for usage billing
+        let bytes_sent: Arc<std::sync::atomic::AtomicU64> = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let bytes_sent_clone = bytes_sent.clone();
 
         let result: Result<String, anyhow::Error> = (|| -> anyhow::Result<String> {
             let capture = match device_index {
@@ -123,7 +131,6 @@ pub(crate) fn start_recording_inner(
                         app_id.clone(),
                         secret_id.clone(),
                         secret_key.clone(),
-                        cfg.vad_enabled,
                     )
                 )
             };
@@ -131,6 +138,10 @@ pub(crate) fn start_recording_inner(
             let rt = tokio::runtime::Runtime::new()?;
 
             let capture_thread = thread::spawn(move || {
+                let vad: RefCell<Option<VadFilter>> = RefCell::new(
+                    if vad_enabled { Some(VadFilter::default_16000()) } else { None }
+                );
+
                 let result = capture.capture_streaming(
                     move |chunk: Vec<u8>| {
                         let sum: f64 = chunk
@@ -144,7 +155,7 @@ pub(crate) fn start_recording_inner(
                         let volume = ((rms / 32768.0).min(1.0)) as f32;
                         let _ = app_for_volume.emit_all("volume-update", volume);
 
-                        // Detect speech for VAD-based status (IPC overlay only)
+                        // Energy for overlay IPC status
                         let energy = rms / 32767.0;
                         let has_speech = energy >= 0.005;
 
@@ -158,7 +169,22 @@ pub(crate) fn start_recording_inner(
                             }
                         }
 
-                        let _ = pcm_tx.blocking_send(chunk);
+                        // Local VAD gating via VadFilter (with hangover).
+                        // - Tencent: reduces API cost by filtering silence
+                        // - local_embedded: pre-filters to reduce engine load
+                        // - local (remote STT): always sends, VAD is server-side
+                        if let Some(ref mut v) = *vad.borrow_mut() {
+                            if v.process_i16(&chunk) == VadDecision::Speech {
+                                bytes_sent_clone.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                                let _ = pcm_tx.blocking_send(chunk);
+                            }
+                        } else {
+                            // VAD disabled → send all
+                            if is_tencent {
+                                bytes_sent_clone.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                            }
+                            let _ = pcm_tx.blocking_send(chunk);
+                        }
                     },
                     stop_signal_for_capture,
                 );
@@ -246,22 +272,25 @@ pub(crate) fn start_recording_inner(
         trigger::resume_audio();
         state::IS_RECORDING.store(false, Ordering::SeqCst);
 
-        // Track Tencent Cloud API usage time (actual WebSocket connection duration)
+        // Track Tencent Cloud API usage based on actual audio bytes sent
+        // 16kHz 16-bit mono = 32000 bytes per second
         if is_tencent {
-            let elapsed = api_start.elapsed().as_secs();
-            if elapsed > 0 {
+            let sent_bytes = bytes_sent.load(Ordering::Relaxed);
+            // Convert to seconds (round up partial seconds)
+            let audio_secs = (sent_bytes + 31999) / 32000;
+            if audio_secs > 0 {
                 let total = {
                     let mut config_guard = state::CURRENT_CONFIG.lock().unwrap();
                     if let Some(ref mut c) = *config_guard {
-                        c.tencent_usage_seconds += elapsed;
+                        c.tencent_usage_seconds += audio_secs;
                         let _ = c.save();
                         c.tencent_usage_seconds
                     } else {
-                        elapsed
+                        audio_secs
                     }
                 };
                 let _ = app.emit_all("tencent-usage-updated", total);
-                log::info("tencent", &format!("API connection time: {}s, cumulative: {}s", elapsed, total));
+                log::info("tencent", &format!("Audio sent: {} bytes (~{}s), cumulative: {}s", sent_bytes, audio_secs, total));
             }
         }
 

@@ -31,17 +31,15 @@ pub struct StreamingRecognizer {
     secret_id: String,
     secret_key: String,
     engine_model: String,
-    need_vad: bool,
 }
 
 impl StreamingRecognizer {
-    pub fn new(app_id: String, secret_id: String, secret_key: String, need_vad: bool) -> Self {
+    pub fn new(app_id: String, secret_id: String, secret_key: String) -> Self {
         Self {
             app_id,
             secret_id,
             secret_key,
             engine_model: "16k_zh".to_string(),
-            need_vad,
         }
     }
 
@@ -58,7 +56,7 @@ impl StreamingRecognizer {
             &self.secret_key,
             &self.engine_model,
             audio_format,
-            self.need_vad,
+            true,
         )
     }
 
@@ -285,7 +283,6 @@ mod tests {
             "12345".into(),
             "test_id".into(),
             "test_key".into(),
-            true,
         );
         let url = recognizer.build_asr_url(16000);
         assert!(url.starts_with("wss://"));
