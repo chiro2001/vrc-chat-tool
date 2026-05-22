@@ -171,7 +171,7 @@ function App() {
       setLastResult("");
       setLastError("");
       setTriggerHeardText("");
-      if (providerRef.current === "tencent") setVadStatus("speech");
+      if (providerRef.current === "tencent") setVadStatus("silence");
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording-partial", (event) => {
