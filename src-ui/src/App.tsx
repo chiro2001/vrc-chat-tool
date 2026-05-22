@@ -92,6 +92,7 @@ function App() {
     keyboard_input_mode: "sendinput",
     floating_window_enabled: true,
     vr_controller_enabled: false,
+    vr_hud_enabled: true,
   });
 
 
@@ -500,6 +501,12 @@ function App() {
             onClick={() => updateConfig("keyboard_input_enabled", !config.keyboard_input_enabled)}
           >
             {t("config.kbOnly")}
+          </button>
+          <button
+            className={`test-modal-trigger${config.vr_hud_enabled ? " kb-active" : ""}`}
+            onClick={() => updateConfig("vr_hud_enabled", !config.vr_hud_enabled)}
+          >
+            {t("config.vrHud")}
           </button>
           <button className="test-modal-trigger" onClick={() => setShowConfigModal(true)}>
             {t("config.title")}
