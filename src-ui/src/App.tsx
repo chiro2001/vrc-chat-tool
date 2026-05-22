@@ -452,7 +452,6 @@ function App() {
             {config.asr_provider === "tencent" && vadStatus !== "idle" && (
               <span className={`status-vad ${vadStatus === "speech" ? "vad-speech" : "vad-silence"}`}>
                 <span className="vad-dot" />
-                {vadStatus === "speech" ? t("config.vadOn") : t("config.vadOff")}
               </span>
             )}
           </span>
