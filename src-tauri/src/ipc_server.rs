@@ -187,7 +187,14 @@ pub fn start_overlay_ipc() {
             // Data loop
             let interval = Duration::from_millis(33);
             loop {
-                if !IPC_RUNNING.load(Ordering::Relaxed) { break; }
+                if !IPC_RUNNING.load(Ordering::Relaxed) {
+                    // Send bye before closing — triggers graceful HUD shutdown
+                    let bye = b"{\"type\":\"bye\"}\n";
+                    let mut w: u32 = 0;
+                    unsafe { WriteFile(handle, bye.as_ptr() as *const c_void, bye.len() as u32, &mut w, std::ptr::null_mut()); }
+                    log::info("ipc", "Sent bye, closing pipe");
+                    break;
+                }
 
                 let msg = OVERLAY_MSG.lock().unwrap().clone();
                 let json = serde_json::to_string(&msg).unwrap_or_default();

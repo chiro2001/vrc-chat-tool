@@ -4,6 +4,7 @@ use vrc_chat_tool::state;
 use vrc_chat_tool::trigger;
 use vrc_chat_tool::hotkey;
 use vrc_chat_tool::log;
+use vrc_chat_tool::ipc_server;
 
 #[tauri::command]
 pub fn get_config() -> Option<config::AppConfig> {
@@ -17,6 +18,7 @@ pub fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(
     let old_config = state::CURRENT_CONFIG.lock().unwrap().clone();
     let hotkey_was_enabled = old_config.as_ref().map(|c| c.global_hotkey_enabled).unwrap_or(false);
     let trigger_was_enabled = old_config.as_ref().map(|c| c.trigger_listener_enabled).unwrap_or(false);
+    let vr_hud_was_enabled = old_config.as_ref().map(|c| c.vr_hud_enabled).unwrap_or(false);
 
     if let Err(e) = config.save() {
         return Err(format!("Failed to save config: {}", e));
@@ -38,6 +40,15 @@ pub fn save_config(app: tauri::AppHandle, config: config::AppConfig) -> Result<(
     } else if !config.trigger_listener_enabled && trigger_was_enabled {
         log::info("main", "Trigger listener disabled, stopping...");
         trigger::stop_capture();
+    }
+
+    if config.vr_hud_enabled && !vr_hud_was_enabled {
+        log::info("main", "VR HUD enabled, restarting IPC server and spawning...");
+        ipc_server::start_overlay_ipc();
+        crate::spawn_vr_hud();
+    } else if !config.vr_hud_enabled && vr_hud_was_enabled {
+        log::info("main", "VR HUD disabled, killing...");
+        crate::kill_vr_hud();
     }
 
     Ok(())

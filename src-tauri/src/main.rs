@@ -36,11 +36,16 @@ fn save_device_index(device_idx: u32) {
     history::set_audio_device_index(device_idx as usize);
 }
 
+#[tauri::command]
+fn is_steamvr_running() -> bool {
+    config::is_steamvr_running()
+}
+
 // --- Helpers ---
 
 static HUD_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
-fn spawn_vr_hud() {
+pub(crate) fn spawn_vr_hud() {
     let exe_dir = match std::env::current_exe() {
         Ok(p) => p.parent().map(|p| p.to_path_buf()),
         Err(_) => None,
@@ -73,25 +78,29 @@ fn spawn_vr_hud() {
     }
 }
 
-fn kill_vr_hud() {
-    if let Some(mut child) = HUD_CHILD.lock().unwrap().take() {
-        log::info("main", "Shutting down VR HUD");
-        let pid = child.id();
-        // Send Ctrl+C for graceful shutdown (triggers OpenVR cleanup)
-        unsafe { winapi::um::wincon::GenerateConsoleCtrlEvent(0, pid); }
-        // Wait up to 3s for graceful exit, then force kill
-        for _ in 0..30 {
-            match child.try_wait() {
-                Ok(Some(_)) => {
-                    log::info("main", "VR HUD exited gracefully");
-                    return;
+pub(crate) fn kill_vr_hud() {
+    if let Some(child) = HUD_CHILD.lock().unwrap().take() {
+        log::info("main", "Stopping VR HUD (sending bye via IPC)");
+        // Signal IPC server to send bye — HUD receives it and exits gracefully
+        vrc_chat_tool::ipc_server::stop_overlay_ipc();
+        // Wait for graceful exit in background — don't block the UI thread
+        std::thread::spawn(move || {
+            let mut child = child;
+            for _ in 0..150 {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        log::info("main", &format!(
+                            "VR HUD exited gracefully (code: {:?})",
+                            status.code()
+                        ));
+                        return;
+                    }
+                    _ => std::thread::sleep(std::time::Duration::from_millis(100)),
                 }
-                _ => std::thread::sleep(std::time::Duration::from_millis(100)),
             }
-        }
-        log::warn("main", "VR HUD did not exit, force killing");
-        let _ = child.kill();
-        let _ = child.wait();
+            log::error("main", "VR HUD did not exit after 15s — OpenVR resources may leak");
+            // Intentionally NOT force-killing: would leak OpenVR GPU resources
+        });
     }
 }
 
@@ -148,8 +157,15 @@ fn main() {
         };
     }
 
-    // Spawn VR HUD companion process
-    let _hud_child = spawn_vr_hud();
+    // Spawn VR HUD companion process if enabled and SteamVR is running
+    if config.vr_hud_enabled && config::is_steamvr_running() {
+        let _hud_child = spawn_vr_hud();
+    } else {
+        log::info("main", &format!(
+            "VR HUD not started (enabled={}, steamvr_running={})",
+            config.vr_hud_enabled, config::is_steamvr_running()
+        ));
+    }
 
     tauri::Builder::default()
         .setup(|app| {
@@ -293,6 +309,7 @@ fn main() {
             commands::maintenance::reset_tencent_usage,
             commands::overlay::toggle_overlay_window,
             commands::overlay::is_overlay_visible,
+            is_steamvr_running,
         ])
         .on_window_event(|event| {
             if let tauri::WindowEvent::Destroyed = event.event() {

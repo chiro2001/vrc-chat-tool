@@ -95,6 +95,7 @@ fn default_hud_pos_x() -> f32 { -0.4 }
 fn default_hud_pos_y() -> f32 { 0.3 }
 fn default_hud_pos_z() -> f32 { -1.5 }
 fn default_language() -> String { "zh".into() }
+fn default_true() -> bool { true }
 
 impl Default for VrHudConfig {
     fn default() -> Self {
@@ -160,6 +161,8 @@ pub struct AppConfig {
     // ---- VR HUD ----
     #[serde(default)]
     pub vr_hud: VrHudConfig,
+    #[serde(default = "default_true")]
+    pub vr_hud_enabled: bool,
 
     // ---- Hotkey ----
     pub global_hotkey_enabled: bool,
@@ -197,6 +200,7 @@ impl Default for AppConfig {
             floating_window_enabled: true,
             vr_controller_enabled: false,
             vr_hud: VrHudConfig::default(),
+            vr_hud_enabled: true,
 
             global_hotkey_enabled: true,
         }
@@ -243,4 +247,16 @@ impl AppConfig {
         fs::write("config.yaml", content)?;
         Ok(())
     }
+}
+
+/// Check if SteamVR is running by looking for vrserver.exe process.
+pub fn is_steamvr_running() -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/fi", "imagename eq vrserver.exe", "/nh"])
+        .output()
+        .map(|o| {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout.contains("vrserver.exe")
+        })
+        .unwrap_or(false)
 }
