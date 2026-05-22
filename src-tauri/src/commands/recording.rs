@@ -1,5 +1,6 @@
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use std::cell::RefCell;
+use std::time::Instant;
 use std::thread;
 use tauri::Manager;
 use vrc_chat_tool::config;
@@ -146,6 +147,9 @@ pub(crate) fn start_recording_inner(
                 // so the API can detect the sentence boundary, then cut off.
                 let flush_remaining: RefCell<usize> = RefCell::new(0usize);
                 const FLUSH_TARGET_SAMPLES: usize = 16000; // ~1s @ 16kHz
+                // Keep-alive: Tencent API disconnects after 15s of silence (error 4008).
+                // Send a short silence chunk every ~5s to keep the connection alive.
+                let last_send: RefCell<Instant> = RefCell::new(Instant::now());
 
                 let result = capture.capture_streaming(
                     move |chunk: Vec<u8>| {
@@ -207,13 +211,23 @@ pub(crate) fn start_recording_inner(
                                 };
                                 bytes_sent_clone.fetch_add(send_bytes as u64, Ordering::Relaxed);
                                 if send_bytes < chunk.len() {
-                                    // Partial flush — only send the needed silence portion
                                     let _ = pcm_tx.blocking_send(vec![0u8; send_bytes]);
                                 } else {
                                     let _ = pcm_tx.blocking_send(chunk);
                                 }
+                                *last_send.borrow_mut() = Instant::now();
+                            } else {
+                                // Silence with flush done → drop to save cost.
+                                // But Tencent API disconnects after 15s of no data (error 4008).
+                                // Send keep-alive silence every 5s.
+                                let elapsed = last_send.borrow().elapsed();
+                                if elapsed.as_secs() >= 5 {
+                                    let keepalive: Vec<u8> = vec![0u8; 3200]; // 100ms silence
+                                    bytes_sent_clone.fetch_add(keepalive.len() as u64, Ordering::Relaxed);
+                                    let _ = pcm_tx.blocking_send(keepalive);
+                                    *last_send.borrow_mut() = Instant::now();
+                                }
                             }
-                            // else: silence with flush done → drop chunk (save cost)
                         } else {
                             // VAD disabled → send all
                             if is_tencent {
