@@ -77,7 +77,7 @@ pub(crate) fn start_recording_inner(
 
         // VAD filter — only for backends where local VAD reduces API cost/engine load.
         // Remote STT (local) handles VAD server-side → skip.
-        let use_vad = is_tencent || cfg.asr_provider == "local_embedded";
+        let use_vad = is_tencent; // Only Tencent: cost reduction. local_embedded has own VAD.
         let vad_enabled = cfg.vad_enabled && use_vad;
 
         // Track actual audio bytes sent to Tencent API for usage billing
@@ -142,6 +142,10 @@ pub(crate) fn start_recording_inner(
                 let vad: RefCell<Option<VadFilter>> = RefCell::new(
                     if vad_enabled { Some(VadFilter::default_16000()) } else { None }
                 );
+                // Tencent silence flush: after speech ends, send ~1s of silence
+                // so the API can detect the sentence boundary, then cut off.
+                let flush_remaining: RefCell<usize> = RefCell::new(0usize);
+                const FLUSH_TARGET_SAMPLES: usize = 16000; // ~1s @ 16kHz
 
                 let result = capture.capture_streaming(
                     move |chunk: Vec<u8>| {
@@ -170,10 +174,9 @@ pub(crate) fn start_recording_inner(
                             }
                         }
 
-                        // Local VAD gating via VadFilter (with hangover).
-                        // - Tencent: reduces API cost by filtering silence
-                        // - local_embedded: pre-filters to reduce engine load
-                        // - local (remote STT): always sends, VAD is server-side
+                        // VAD gating — only for Tencent (cost reduction).
+                        // local_embedded has its own endpoint detection in the engine
+                        // and needs to see silence for sentence boundaries.
                         if let Some(ref mut v) = *vad.borrow_mut() {
                             let prev_speech = v.is_speech();
                             let decision = v.process_i16(&chunk);
@@ -185,16 +188,32 @@ pub(crate) fn start_recording_inner(
                                 let _ = app_for_vad.emit_all("vad-status-change", status);
                             }
 
-                            if decision == VadDecision::Speech {
-                                bytes_sent_clone.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-                                let _ = pcm_tx.blocking_send(chunk);
-                            } else if prev_speech && !now_speech && is_tencent {
-                                // Speech→Silence transition: send a short silence chunk
-                                // to trigger Tencent API sentence finalization.
-                                let silence: Vec<u8> = vec![0u8; 3200]; // 100ms @ 16kHz 16bit mono
-                                bytes_sent_clone.fetch_add(silence.len() as u64, Ordering::Relaxed);
-                                let _ = pcm_tx.blocking_send(silence);
+                            // Speech→Silence transition: start flush countdown
+                            if prev_speech && !now_speech {
+                                *flush_remaining.borrow_mut() = FLUSH_TARGET_SAMPLES;
                             }
+
+                            let flushing = *flush_remaining.borrow_mut();
+
+                            if decision == VadDecision::Speech || flushing > 0 {
+                                let send_bytes = if decision == VadDecision::Speech {
+                                    chunk.len()
+                                } else {
+                                    // Flush mode: send silence, capped at remaining
+                                    let chunk_samples = chunk.len() / 2;
+                                    let samples_to_send = flushing.min(chunk_samples);
+                                    *flush_remaining.borrow_mut() -= samples_to_send;
+                                    samples_to_send * 2 // back to bytes
+                                };
+                                bytes_sent_clone.fetch_add(send_bytes as u64, Ordering::Relaxed);
+                                if send_bytes < chunk.len() {
+                                    // Partial flush — only send the needed silence portion
+                                    let _ = pcm_tx.blocking_send(vec![0u8; send_bytes]);
+                                } else {
+                                    let _ = pcm_tx.blocking_send(chunk);
+                                }
+                            }
+                            // else: silence with flush done → drop chunk (save cost)
                         } else {
                             // VAD disabled → send all
                             if is_tencent {
