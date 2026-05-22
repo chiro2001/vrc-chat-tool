@@ -59,6 +59,8 @@ fn main() -> anyhow::Result<()> {
     let mut reconnect_ms: u64 = 1000;
     let mut was_connected = false;
     let mut last_visible = true;
+    let start_time = std::time::Instant::now();
+    const CONNECT_TIMEOUT_SECS: u64 = 30;
 
     loop {
         while let Some(_) = system.poll_next_event() {}
@@ -84,6 +86,10 @@ fn main() -> anyhow::Result<()> {
                 None => connected = false,
             }
         } else {
+            if start_time.elapsed().as_secs() >= CONNECT_TIMEOUT_SECS {
+                tracing::info!("IPC connection timeout ({}s), exiting", CONNECT_TIMEOUT_SECS);
+                return Ok(());
+            }
             std::thread::sleep(Duration::from_millis(reconnect_ms));
             reconnect_ms = (reconnect_ms * 2).min(16000);
             let (c, ok) = connect_to_server();
