@@ -96,6 +96,7 @@ const translations: Record<Lang, Record<string, string>> = {
     "config.seconds": "秒",
     "config.kbOnly": "键盘",
     "config.overlay": "浮窗",
+    "config.vrHud": "VR HUD",
     "config.tencentCredentialsLoadFailed": "凭证加载失败",
     "config.save": "保存",
     "stt.connected": "STT 已连接",
