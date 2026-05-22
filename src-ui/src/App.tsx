@@ -464,9 +464,10 @@ function App() {
             )}
           </span>
           {compatWarning && (
-            <span className="compat-warning" title={compatWarning}>
-              ⚠ VR
-            </span>
+            <button className="compat-warning" title={compatWarning}
+              onClick={() => { invoke("restart_as_admin").catch(console.error); }}>
+              ⚠ 以管理员重启
+            </button>
           )}
         </div>
       </header>

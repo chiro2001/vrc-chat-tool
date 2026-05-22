@@ -122,13 +122,18 @@ header h1 {
 .compat-warning {
   display: inline-flex;
   align-items: center;
-  padding: 0.35rem 0.5rem;
+  padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.75rem;
+  font-weight: 500;
   background: #5c3a0a;
   color: #ffb74d;
   border: 1px solid #ff9800;
-  cursor: help;
+  cursor: pointer;
+}
+.compat-warning:hover {
+  background: #7a4e0e;
+  color: #ffcc80;
 }
 
 @keyframes pulse {

@@ -375,3 +375,38 @@ pub fn check_steamvr_compat() -> (bool, String) {
         _ => (true, String::new()), // Both elevated or both not
     }
 }
+
+/// Restart the current process with administrator privileges via UAC.
+/// Uses ShellExecuteW with "runas" verb. Exits current process on success.
+pub fn restart_as_admin() -> anyhow::Result<()> {
+    let exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Failed to get exe path: {}", e))?;
+    let exe_str = exe.to_string_lossy();
+
+    use std::ffi::CString;
+    let op = CString::new("runas").unwrap();
+    let file = CString::new(exe_str.as_ref()).unwrap();
+    let dir = exe.parent()
+        .and_then(|p| p.to_str())
+        .map(|s| CString::new(s).ok())
+        .flatten();
+
+    unsafe {
+        use winapi::um::shellapi::ShellExecuteA;
+        use winapi::um::winuser::SW_SHOW;
+        let ret = ShellExecuteA(
+            std::ptr::null_mut(),
+            op.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
+            SW_SHOW,
+        );
+        // ShellExecute returns HINSTANCE > 32 on success
+        if ret as isize > 32 {
+            std::process::exit(0);
+        }
+        let err = ret as u32;
+        anyhow::bail!("ShellExecute(runas) failed with code {}", err);
+    }
+}

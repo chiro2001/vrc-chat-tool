@@ -52,6 +52,11 @@ fn check_steamvr_compat() -> SteamvrCompatResult {
     SteamvrCompatResult { ok, message }
 }
 
+#[tauri::command]
+fn restart_as_admin() -> Result<(), String> {
+    config::restart_as_admin().map_err(|e| format!("{}", e))
+}
+
 // --- Helpers ---
 
 // HUD lifecycle functions moved to vrc_chat_tool::hud
@@ -263,6 +268,7 @@ fn main() {
             commands::overlay::is_overlay_visible,
             is_steamvr_running,
             check_steamvr_compat,
+            restart_as_admin,
         ])
         .on_window_event(|event| {
             if let tauri::WindowEvent::Destroyed = event.event() {
